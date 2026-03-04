@@ -14,9 +14,17 @@ FvePlatform get currentPlatform {
 FveArch get currentArch {
   try {
     final result = Process.runSync('uname', ['-m']);
-    final arch = result.stdout.toString().trim();
-    if (arch == 'arm64' || arch == 'aarch64') return FveArch.arm64;
+    if (result.exitCode == 0) {
+      final arch = result.stdout.toString().trim();
+      if (arch == 'arm64' || arch == 'aarch64') return FveArch.arm64;
+      return FveArch.x64;
+    }
   } catch (_) {}
+  // uname unavailable — warn so the user knows a wrong binary may be selected.
+  stderr.writeln(
+    'fve warning: could not detect CPU architecture via uname. '
+    'Assuming x64 — if you are on arm64, use --no-git to force archive download.',
+  );
   return FveArch.x64;
 }
 

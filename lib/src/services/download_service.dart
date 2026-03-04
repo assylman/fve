@@ -96,9 +96,7 @@ class DownloadService {
   /// into a temp dir and then rename that inner directory to [destDir] so the
   /// final layout is `destDir/bin/flutter` (not `destDir/flutter/bin/flutter`).
   Future<void> extractSdk(String archivePath, String destDir) async {
-    final tempDir = Directory('${destDir}_tmp_extract');
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-    tempDir.createSync(recursive: true);
+    final tempDir = Directory.systemTemp.createTempSync('fve_extract_');
 
     try {
       await _extract(archivePath, tempDir.path);
