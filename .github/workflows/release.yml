@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: write   # needed to create GitHub Releases and upload assets
-  pages: write      # needed to deploy to GitHub Pages
-  id-token: write   # needed for GitHub Pages OIDC
 
 jobs:
   # ── Build binaries for each platform ─────────────────────────────────────
@@ -65,27 +63,3 @@ jobs:
           files: build/**/*
           generate_release_notes: true
 
-  # ── Deploy install.sh to GitHub Pages ────────────────────────────────────
-  pages:
-    needs: release
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Prepare Pages content
-        run: |
-          mkdir -p _site
-          cp install.sh _site/install.sh
-
-      - uses: actions/configure-pages@v4
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site/
-
-      - id: deploy
-        uses: actions/deploy-pages@v4
