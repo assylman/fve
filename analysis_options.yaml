@@ -1,0 +1,15 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  errors:
+    missing_return: error
+    unused_import: warning
+    unused_local_variable: warning
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - prefer_const_constructors
+    - unnecessary_const
+    - avoid_print
+    - prefer_final_locals
