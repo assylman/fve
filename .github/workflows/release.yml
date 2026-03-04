@@ -19,9 +19,6 @@ jobs:
           - os: macos-latest
             arch: arm64
             artifact: fve-macos-arm64
-          - os: macos-13       # x64 runner
-            arch: x64
-            artifact: fve-macos-x64
           - os: ubuntu-latest
             arch: x64
             artifact: fve-linux-x64
