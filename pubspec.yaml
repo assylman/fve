@@ -1,9 +1,9 @@
 name: fve
 description: Flutter Version & Environment Manager — install, switch, and manage multiple Flutter SDK versions with per-project configuration.
 version: 0.1.0
-homepage: https://github.com/yourname/fve
-repository: https://github.com/yourname/fve
-issue_tracker: https://github.com/yourname/fve/issues
+homepage: https://github.com/assylman/fve
+repository: https://github.com/assylman/fve
+issue_tracker: https://github.com/assylman/fve/issues
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
