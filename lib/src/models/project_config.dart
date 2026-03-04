@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../utils/logger.dart';
+
 const _configFileName = '.fverc';
 
 class ProjectConfig {
@@ -36,6 +38,9 @@ class ProjectConfig {
           final json = jsonDecode(file.readAsStringSync());
           return ProjectConfig.fromJson(json as Map<String, dynamic>);
         } catch (_) {
+          Logger.warning(
+            '${file.path} is invalid — expected {"flutter_version": "x.y.z"}',
+          );
           return null;
         }
       }

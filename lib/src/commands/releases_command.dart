@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' show exit, stdin, stdout;
 
 import '../help.dart';
 import '../models/flutter_release.dart';
@@ -56,7 +56,7 @@ class ReleasesCommand extends FveCommand {
       resp = await ReleasesService().fetchReleases();
     } catch (e) {
       Logger.error('Could not fetch releases: $e');
-      return;
+      exit(1);
     }
 
     final seen = <String>{};

@@ -97,9 +97,8 @@ class SetupCommand extends FveCommand {
     final file = File(rcFile);
     if (!file.existsSync()) return false;
     final content = file.readAsStringSync();
-    return shell == 'fish'
-        ? content.contains('.fve/current/bin')
-        : content.contains('.fve/current/bin');
+    // Fish uses fish_add_path; bash/zsh use PATH export.
+    return content.contains('.fve/current/bin');
   }
 
   void _writeToRc(String rcFile, String exportLine, String shell) {
