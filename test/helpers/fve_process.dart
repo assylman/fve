@@ -181,19 +181,39 @@ class FveTestEnv {
 
   // ── Convenience run ─────────────────────────────────────────────────────
 
+  /// The path that fve injects for flutter — `<home>/.fve/current/bin`.
+  String get fveBinPath => p.join(fveHome, 'current', 'bin');
+
   /// Runs fve with this environment's HOME.
   ///
   /// [workingDir] defaults to the project root (not the temp home).
+  /// [extraEnv] merges additional environment variables (e.g. to mock PATH).
   Future<FveResult> run(
     List<String> args, {
     String? workingDir,
     String? stdin,
+    Map<String, String> extraEnv = const {},
   }) =>
       runFve(
         args,
         homeDir: homePath,
         workingDir: workingDir,
         stdin: stdin,
+        extraEnv: extraEnv,
+      );
+
+  /// Like [run] but also adds the fve bin path to PATH so that `fve doctor`
+  /// considers the shell setup healthy.
+  Future<FveResult> runWithPath(
+    List<String> args, {
+    String? workingDir,
+    String? stdin,
+  }) =>
+      run(
+        args,
+        workingDir: workingDir,
+        stdin: stdin,
+        extraEnv: {'PATH': '$fveBinPath:${Platform.environment['PATH'] ?? ''}'},
       );
 
   // ── Query helpers ───────────────────────────────────────────────────────

@@ -14,9 +14,9 @@ void main() {
   // ── Basic execution ───────────────────────────────────────────────────────
 
   group('fve doctor — basic execution', () {
-    test('exits 0', () async {
+    test('exits 1 when PATH not configured', () async {
       final r = await env.run(['doctor']);
-      expect(r.exitCode, 0);
+      expect(r.exitCode, 1);
     });
 
     test('outputs section headers', () async {
@@ -55,8 +55,8 @@ void main() {
       env.setGlobal('3.22.2');
     });
 
-    test('exits 0', () async {
-      expect((await env.run(['doctor'])).exitCode, 0);
+    test('exits 0 when PATH configured', () async {
+      expect((await env.runWithPath(['doctor'])).exitCode, 0);
     });
 
     test('reports the installed version', () async {
@@ -76,8 +76,8 @@ void main() {
       projPath = dir.path;
     });
 
-    test('exits 0', () async {
-      expect((await env.run(['doctor'], workingDir: projPath)).exitCode, 0);
+    test('exits 0 when PATH configured', () async {
+      expect((await env.runWithPath(['doctor'], workingDir: projPath)).exitCode, 0);
     });
 
     test('shows project version in output', () async {
@@ -96,9 +96,9 @@ void main() {
       projPath = dir.path;
     });
 
-    test('exits 0 but reports the problem', () async {
+    test('exits 1 and reports the problem', () async {
       final r = await env.run(['doctor'], workingDir: projPath);
-      expect(r.exitCode, 0);
+      expect(r.exitCode, 1);
       // Should say the version isn't installed.
       expect(r.output, contains('9.9.9'));
     });
@@ -110,7 +110,7 @@ void main() {
     test('does not print iOS section when no Podfile', () async {
       final dir = env.createProjectDir(pinnedVersion: '3.22.2');
       env.installVersion('3.22.2');
-      final r = await env.run(['doctor'], workingDir: dir.path);
+      final r = await env.runWithPath(['doctor'], workingDir: dir.path);
       expect(r.exitCode, 0);
       expect(r.output.toLowerCase(), isNot(contains('cocoapods')));
     });

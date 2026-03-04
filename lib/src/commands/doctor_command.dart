@@ -16,6 +16,8 @@ class DoctorCommand extends FveCommand {
   String get description =>
       'Check your fve environment for problems and print setup instructions.';
 
+  var _criticalError = false;
+
   @override
   Future<void> run() async {
     Logger.bold('\nfve doctor');
@@ -39,6 +41,7 @@ class DoctorCommand extends FveCommand {
     final versions = cache.installedVersions();
     if (versions.isEmpty) {
       Logger.warning('  No versions installed. Run: fve install <version>');
+      _criticalError = true;
     } else {
       for (final v in versions) {
         Logger.success('  $v');
@@ -71,6 +74,7 @@ class DoctorCommand extends FveCommand {
           ? null
           : 'Add to your shell rc:\n'
               '    export PATH="\$HOME/.fve/current/bin:\$PATH"',
+      critical: true,
     );
 
     // ── 5. Project config ────────────────────────────────────────────────
@@ -84,6 +88,7 @@ class DoctorCommand extends FveCommand {
         'Project version installed',
         installed,
         installed ? null : 'Run: fve install $v',
+        critical: true,
       );
       final configPath = ProjectConfig.configPathForDirectory('.');
       Logger.dim('  config: $configPath');
@@ -106,12 +111,14 @@ class DoctorCommand extends FveCommand {
             false,
             'injected for $injectedVersion, but .fverc pins $version\n'
             '    Fix: fve use $version',
+            critical: true,
           );
         } else {
           _check(
             'Podfile injection',
             false,
             'fve block missing\n    Fix: fve use $version',
+            critical: true,
           );
         }
         final podCacheExists = Directory(pod.podCacheDir(version)).existsSync();
@@ -137,6 +144,7 @@ class DoctorCommand extends FveCommand {
     }
 
     print('');
+    if (_criticalError) exit(1);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -145,11 +153,12 @@ class DoctorCommand extends FveCommand {
     Logger.header(title);
   }
 
-  void _check(String label, bool ok, String? detail) {
+  void _check(String label, bool ok, String? detail, {bool critical = false}) {
     if (ok) {
       Logger.success('  $label${detail != null ? ': $detail' : ''}');
     } else {
       Logger.error('  $label${detail != null ? '\n    $detail' : ''}');
+      if (critical) _criticalError = true;
     }
   }
 
