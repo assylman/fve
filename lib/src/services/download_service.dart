@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import '../utils/logger.dart';
+import '../utils/tui.dart';
 
 /// Handles download, checksum verification, and SDK extraction.
 ///
@@ -95,9 +96,7 @@ class DownloadService {
   /// into a temp dir and then rename that inner directory to [destDir] so the
   /// final layout is `destDir/bin/flutter` (not `destDir/flutter/bin/flutter`).
   Future<void> extractSdk(String archivePath, String destDir) async {
-    final tempDir = Directory('${destDir}_tmp_extract');
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-    tempDir.createSync(recursive: true);
+    final tempDir = Directory.systemTemp.createTempSync('fve_extract_');
 
     try {
       await _extract(archivePath, tempDir.path);
@@ -312,25 +311,26 @@ class DownloadService {
   // ── HTTP streaming fallback ───────────────────────────────────────────────
 
   Future<void> _downloadWithHttp(String url, String destPath) async {
-    final request = http.Request('GET', Uri.parse(url));
+    final request  = http.Request('GET', Uri.parse(url));
     final response = await _client.send(request);
 
     if (response.statusCode != 200) {
       throw Exception('Download failed (HTTP ${response.statusCode}): $url');
     }
 
-    final totalBytes = response.contentLength ?? 0;
-    var downloadedBytes = 0;
-    final sink = File(destPath).openWrite();
+    final total = response.contentLength ?? 0;
+    var received = 0;
+    final sink   = File(destPath).openWrite();
+    final bar    = ProgressBar(total: total, label: p.basename(destPath));
 
     await for (final chunk in response.stream) {
       sink.add(chunk);
-      downloadedBytes += chunk.length;
-      _printProgress(downloadedBytes, totalBytes, p.basename(destPath));
+      received += chunk.length;
+      bar.update(received);
     }
 
     await sink.close();
-    Logger.progressDone();
+    bar.complete();
   }
 
   // ── Extraction helpers ────────────────────────────────────────────────────
@@ -369,27 +369,4 @@ class DownloadService {
     }
   }
 
-  // ── HTTP progress bar ─────────────────────────────────────────────────────
-
-  void _printProgress(int downloaded, int total, String filename) {
-    if (total <= 0) {
-      Logger.progress(
-        '  Downloading $filename — ${_formatBytes(downloaded)}',
-      );
-      return;
-    }
-
-    final pct = (downloaded / total * 100).round();
-    final filled = (pct / 5).round(); // 20-char wide bar
-    final bar = '${'█' * filled}${'░' * (20 - filled)}';
-    Logger.progress(
-      '  $bar $pct%  ${_formatBytes(downloaded)} / ${_formatBytes(total)}',
-    );
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '${bytes}B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
-  }
 }

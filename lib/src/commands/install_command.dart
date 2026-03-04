@@ -4,10 +4,12 @@ import 'package:path/path.dart' as p;
 
 import '../help.dart';
 import '../models/flutter_release.dart';
+import '../models/project_config.dart';
 import '../services/cache_service.dart';
 import '../services/download_service.dart';
 import '../services/releases_service.dart';
 import '../utils/logger.dart';
+import '../utils/tui.dart';
 import 'base_command.dart';
 
 class InstallCommand extends FveCommand {
@@ -56,21 +58,31 @@ class InstallCommand extends FveCommand {
 
   @override
   Future<void> run() async {
+    // If no version given, try to read it from the nearest .fverc.
+    String versionArg;
     if (argResults!.rest.isEmpty) {
-      usageException(
-        'Please provide a version number or channel name.\n'
-        'Example: fve install 3.22.2',
-      );
+      final projectConfig = ProjectConfig.findForDirectory('.');
+      if (projectConfig == null) {
+        usageException(
+          'Please provide a version number or channel name.\n'
+          'Example: fve install 3.22.2\n'
+          'Or run from a directory with a .fverc to install the pinned version.',
+        );
+      }
+      versionArg = projectConfig.flutterVersion;
+      Logger.dim('Using pinned version from .fverc: $versionArg');
+    } else {
+      versionArg = argResults!.rest.first;
     }
-
-    final versionArg = argResults!.rest.first;
     final force = argResults!['force'] as bool;
     final noGit = argResults!['no-git'] as bool;
     final cache = CacheService()..ensureDirectoriesExist();
 
     // Resolve the actual release metadata (also validates the version exists).
-    Logger.info('Resolving version "$versionArg"…');
+    final resolveSpinner = Spinner('Resolving "$versionArg"');
+    resolveSpinner.start();
     final release = await ReleasesService().findRelease(versionArg);
+    resolveSpinner.stop();
 
     if (release == null) {
       Logger.error('No release found for "$versionArg".');
@@ -168,17 +180,17 @@ class InstallCommand extends FveCommand {
         'https://storage.googleapis.com/flutter_infra_release/releases/${release.archive}';
 
     try {
-      Logger.plain('  Downloading…');
       await downloader.download(url, archivePath);
 
-      Logger.plain('  Verifying checksum…');
+      final checksumSpinner = Spinner('Verifying checksum');
+      checksumSpinner.start();
       await downloader.verifySha256(archivePath, release.sha256);
-      Logger.success('Checksum OK');
+      checksumSpinner.stop(done: 'Checksum OK');
 
-      Logger.plain('  Extracting…');
+      final extractSpinner = Spinner('Extracting SDK');
+      extractSpinner.start();
       await downloader.extractSdk(archivePath, destDir);
-
-      Logger.success('Flutter ${release.version} installed at $destDir');
+      extractSpinner.stop(done: 'Flutter ${release.version} installed at $destDir');
       print('');
       _printNextSteps(release.version);
     } finally {

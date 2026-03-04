@@ -6,6 +6,13 @@ import 'package:test/test.dart';
 
 import '../helpers/fve_process.dart';
 
+// Writes a minimal ios/Podfile into [dir].
+void _createPodfile(Directory dir) {
+  final iosDir = Directory(p.join(dir.path, 'ios'))..createSync();
+  File(p.join(iosDir.path, 'Podfile'))
+      .writeAsStringSync("platform :ios, '12.0'\n");
+}
+
 void main() {
   late FveTestEnv env;
   late Directory projectDir;
@@ -16,17 +23,19 @@ void main() {
   });
   tearDown(() => env.dispose());
 
-  // ── Missing arguments ─────────────────────────────────────────────────────
+  // ── No arguments — shows current version ─────────────────────────────────
+  //
+  // `fve use` with no arguments shows the active version rather than erroring.
 
-  group('fve use — missing arguments', () {
-    test('exits 64 when no version is provided', () async {
+  group('fve use — no arguments', () {
+    test('exits 0 when no version is provided', () async {
       final r = await env.run(['use'], workingDir: projectDir.path);
-      expect(r.exitCode, 64);
+      expect(r.exitCode, 0);
     });
 
-    test('prints a usage hint when no version is provided', () async {
+    test('prints version-related output when no version is provided', () async {
       final r = await env.run(['use'], workingDir: projectDir.path);
-      expect(r.output, contains('version'));
+      expect(r.output.toLowerCase(), anyOf(contains('version'), contains('fverc')));
     });
   });
 
@@ -263,6 +272,84 @@ void main() {
     test('exits 0', () async {
       final r = await env.run(
         ['use', '--help'],
+        workingDir: projectDir.path,
+      );
+      expect(r.exitCode, 0);
+    });
+  });
+
+  // ── Podfile injection ──────────────────────────────────────────────────────
+
+  group('fve use — Podfile injection', () {
+    setUp(() => env.installVersion('3.22.2'));
+
+    test('injects CP_HOME_DIR block when ios/Podfile exists', () async {
+      _createPodfile(projectDir);
+      await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+        workingDir: projectDir.path,
+      );
+      final podfile = File(p.join(projectDir.path, 'ios', 'Podfile'));
+      expect(podfile.readAsStringSync(), contains('CP_HOME_DIR'));
+    });
+
+    test('block contains the pinned version string', () async {
+      _createPodfile(projectDir);
+      await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+        workingDir: projectDir.path,
+      );
+      final content =
+          File(p.join(projectDir.path, 'ios', 'Podfile')).readAsStringSync();
+      expect(content, contains('3.22.2'));
+    });
+
+    test('block has Dir.exist? guard so CI without fve is unaffected', () async {
+      _createPodfile(projectDir);
+      await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+        workingDir: projectDir.path,
+      );
+      final content =
+          File(p.join(projectDir.path, 'ios', 'Podfile')).readAsStringSync();
+      expect(content, contains('Dir.exist?'));
+    });
+
+    test('original Podfile content is preserved after injection', () async {
+      _createPodfile(projectDir);
+      await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+        workingDir: projectDir.path,
+      );
+      final content =
+          File(p.join(projectDir.path, 'ios', 'Podfile')).readAsStringSync();
+      expect(content, contains("platform :ios, '12.0'"));
+    });
+
+    test('switching version updates the block (no duplicate blocks)', () async {
+      env.installVersion('3.19.0');
+      _createPodfile(projectDir);
+
+      await env.run(
+        ['use', '3.19.0', '--skip-pub-get', '--no-vscode'],
+        workingDir: projectDir.path,
+      );
+      await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+        workingDir: projectDir.path,
+      );
+
+      final content =
+          File(p.join(projectDir.path, 'ios', 'Podfile')).readAsStringSync();
+      expect(content, contains('3.22.2'));
+      expect(content, isNot(contains('3.19.0')));
+      expect('# fve managed'.allMatches(content).length, 1);
+    });
+
+    test('exits 0 and succeeds when there is no ios/Podfile', () async {
+      // No ios/Podfile created — fve use should still succeed.
+      final r = await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
         workingDir: projectDir.path,
       );
       expect(r.exitCode, 0);

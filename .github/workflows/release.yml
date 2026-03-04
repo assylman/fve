@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create GitHub Releases and upload assets
+  pages: write      # needed to deploy to GitHub Pages
+  id-token: write   # needed for GitHub Pages OIDC
+
+jobs:
+  # ── Build binaries for each platform ─────────────────────────────────────
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            artifact: fve-macos-arm64
+          - os: macos-13       # x64 runner
+            arch: x64
+            artifact: fve-macos-x64
+          - os: ubuntu-latest
+            arch: x64
+            artifact: fve-linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Compile binary
+        run: dart compile exe bin/fve.dart -o build/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: build/${{ matrix.artifact }}
+
+  # ── Create GitHub Release and upload binaries ─────────────────────────────
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/**/*
+          generate_release_notes: true
+
+  # ── Deploy install.sh to GitHub Pages ────────────────────────────────────
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Pages content
+        run: |
+          mkdir -p _site
+          cp install.sh _site/install.sh
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

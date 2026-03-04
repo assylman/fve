@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
+import '../services/pod_service.dart';
 import '../utils/logger.dart';
 import 'base_command.dart';
 
@@ -15,12 +16,15 @@ class DoctorCommand extends FveCommand {
   String get description =>
       'Check your fve environment for problems and print setup instructions.';
 
+  var _criticalError = false;
+
   @override
   Future<void> run() async {
     Logger.bold('\nfve doctor');
     print('');
 
     final cache = CacheService();
+    final cwd = Directory.current.path;
 
     // ── 1. fve home ──────────────────────────────────────────────────────
     _section('fve home');
@@ -37,6 +41,7 @@ class DoctorCommand extends FveCommand {
     final versions = cache.installedVersions();
     if (versions.isEmpty) {
       Logger.warning('  No versions installed. Run: fve install <version>');
+      _criticalError = true;
     } else {
       for (final v in versions) {
         Logger.success('  $v');
@@ -69,6 +74,7 @@ class DoctorCommand extends FveCommand {
           ? null
           : 'Add to your shell rc:\n'
               '    export PATH="\$HOME/.fve/current/bin:\$PATH"',
+      critical: true,
     );
 
     // ── 5. Project config ────────────────────────────────────────────────
@@ -82,6 +88,7 @@ class DoctorCommand extends FveCommand {
         'Project version installed',
         installed,
         installed ? null : 'Run: fve install $v',
+        critical: true,
       );
       final configPath = ProjectConfig.configPathForDirectory('.');
       Logger.dim('  config: $configPath');
@@ -89,7 +96,45 @@ class DoctorCommand extends FveCommand {
       Logger.dim('  No .fverc found. Run: fve use <version>');
     }
 
-    // ── 6. System tools ──────────────────────────────────────────────────
+    // ── 6. iOS / CocoaPods ───────────────────────────────────────────────────
+    final pod = PodService();
+    if (pod.hasPodfile(cwd)) {
+      _section('iOS / CocoaPods');
+      if (projectConfig != null) {
+        final version = projectConfig.flutterVersion;
+        final injectedVersion = pod.podfileInjectionVersion(cwd);
+        if (injectedVersion == version) {
+          _check('Podfile injection', true, 'CP_HOME_DIR → ${pod.podCacheDir(version)}');
+        } else if (injectedVersion != null) {
+          _check(
+            'Podfile injection',
+            false,
+            'injected for $injectedVersion, but .fverc pins $version\n'
+            '    Fix: fve use $version',
+            critical: true,
+          );
+        } else {
+          _check(
+            'Podfile injection',
+            false,
+            'fve block missing\n    Fix: fve use $version',
+            critical: true,
+          );
+        }
+        final podCacheExists = Directory(pod.podCacheDir(version)).existsSync();
+        _check(
+          'Pod cache for $version',
+          podCacheExists,
+          podCacheExists
+              ? pod.podCacheDir(version)
+              : 'Run: fve pod install',
+        );
+      } else {
+        Logger.dim('  ios/Podfile found. Pin a version first: fve use <version>');
+      }
+    }
+
+    // ── 7. System tools ──────────────────────────────────────────────────
     _section('System tools');
     _checkTool('git', ['--version']);
     _checkTool('unzip', ['-v']);
@@ -99,6 +144,7 @@ class DoctorCommand extends FveCommand {
     }
 
     print('');
+    if (_criticalError) exit(1);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -107,11 +153,12 @@ class DoctorCommand extends FveCommand {
     Logger.header(title);
   }
 
-  void _check(String label, bool ok, String? detail) {
+  void _check(String label, bool ok, String? detail, {bool critical = false}) {
     if (ok) {
       Logger.success('  $label${detail != null ? ': $detail' : ''}');
     } else {
       Logger.error('  $label${detail != null ? '\n    $detail' : ''}');
+      if (critical) _criticalError = true;
     }
   }
 
