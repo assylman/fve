@@ -8,6 +8,7 @@ import '../services/cache_service.dart';
 import '../services/download_service.dart';
 import '../services/releases_service.dart';
 import '../utils/logger.dart';
+import '../utils/tui.dart';
 import 'base_command.dart';
 
 class InstallCommand extends FveCommand {
@@ -69,8 +70,10 @@ class InstallCommand extends FveCommand {
     final cache = CacheService()..ensureDirectoriesExist();
 
     // Resolve the actual release metadata (also validates the version exists).
-    Logger.info('Resolving version "$versionArg"…');
+    final resolveSpinner = Spinner('Resolving "$versionArg"');
+    resolveSpinner.start();
     final release = await ReleasesService().findRelease(versionArg);
+    resolveSpinner.stop();
 
     if (release == null) {
       Logger.error('No release found for "$versionArg".');
@@ -168,17 +171,17 @@ class InstallCommand extends FveCommand {
         'https://storage.googleapis.com/flutter_infra_release/releases/${release.archive}';
 
     try {
-      Logger.plain('  Downloading…');
       await downloader.download(url, archivePath);
 
-      Logger.plain('  Verifying checksum…');
+      final checksumSpinner = Spinner('Verifying checksum');
+      checksumSpinner.start();
       await downloader.verifySha256(archivePath, release.sha256);
-      Logger.success('Checksum OK');
+      checksumSpinner.stop(done: 'Checksum OK');
 
-      Logger.plain('  Extracting…');
+      final extractSpinner = Spinner('Extracting SDK');
+      extractSpinner.start();
       await downloader.extractSdk(archivePath, destDir);
-
-      Logger.success('Flutter ${release.version} installed at $destDir');
+      extractSpinner.stop(done: 'Flutter ${release.version} installed at $destDir');
       print('');
       _printNextSteps(release.version);
     } finally {
