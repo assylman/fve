@@ -104,13 +104,6 @@ void main() {
   group('version sort order (comparator properties)', () {
     // Build a fake installed-versions environment in a temp dir.
     late Directory fakeVersionsDir;
-    late Directory fakeFlutterBin;
-
-    void makeVersion(String version) {
-      final binDir = Directory(p.join(fakeVersionsDir.path, version, 'bin'))
-        ..createSync(recursive: true);
-      File(p.join(binDir.path, 'flutter')).writeAsStringSync('');
-    }
 
     setUp(() {
       fakeVersionsDir = Directory.systemTemp.createTempSync('fve_versions_');

@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:fve/src/models/flutter_release.dart';
 import 'package:fve/src/services/releases_service.dart';
 import 'package:test/test.dart';
 
