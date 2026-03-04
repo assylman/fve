@@ -51,6 +51,9 @@ class HelpFormatter {
     _row('exec',    'Run any command inside the version environment');
     _row('spawn',   'Run a one-off command with any installed version');
     _out('');
+    _section('IOS / COCOAPODS');
+    _row('pod', 'Run pod install/update with version-isolated cache');
+    _out('');
     _section('TOOLING & DIAGNOSTICS');
     _row('doctor',  'Diagnose your fve environment');
     _row('config',  'View or update global fve settings');
