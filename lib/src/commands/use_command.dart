@@ -7,6 +7,7 @@ import '../help.dart';
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
 import '../services/config_service.dart';
+import '../services/pod_service.dart';
 import '../utils/logger.dart';
 import 'base_command.dart';
 
@@ -85,6 +86,14 @@ class UseCommand extends FveCommand {
     // Write .fverc.
     ProjectConfig(flutterVersion: version).saveToDirectory(cwd);
     Logger.success('Pinned Flutter $version → $cwd/.fverc');
+
+    // Inject CP_HOME_DIR block into ios/Podfile if the project has one.
+    final pod = PodService();
+    if (pod.hasPodfile(cwd)) {
+      pod.injectPodfile(cwd, version);
+      Logger.success('Updated ios/Podfile with pod cache isolation');
+      Logger.dim('  CP_HOME_DIR → ${pod.podCacheDir(version)}');
+    }
 
     // Update global symlink if requested.
     if (setGlobal) {
