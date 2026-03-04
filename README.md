@@ -1,7 +1,7 @@
 # fve — Flutter Version & Environment Manager
 
 > Install, switch, and manage multiple Flutter SDK versions with per-project pinning.
-> No symlink juggling. No broken teammates. No stale CocoaPods caches. *(coming soon)*
+> No symlink juggling. No broken teammates. No stale CocoaPods caches.
 
 ---
 
@@ -62,8 +62,9 @@ The planned Phase 3 feature — **per-version CocoaPods cache isolation** — go
 - **Global default** — one version can be set as the system-wide fallback via `~/.fve/current`.
 - **Pass-through proxies** — `fve flutter` and `fve dart` forward all arguments to the pinned binary unchanged.
 - **Environment injection** — `fve exec` prepends the correct `bin/` to `PATH` before running any command.
-- **Diagnostics** — `fve doctor` checks your installation, symlinks, PATH, and system tools.
-- **CocoaPods cache isolation** *(coming in Phase 3)* — per-version `CP_HOME_DIR` isolation for iOS projects.
+- **Diagnostics** — `fve doctor` checks your installation, symlinks, PATH, Podfile injection, and pod cache.
+- **CocoaPods cache isolation** — per-version `CP_HOME_DIR` isolation so iOS pod caches never conflict across Flutter versions.
+- **Shell setup** — `fve setup --write` configures your shell PATH automatically.
 
 ---
 
@@ -83,22 +84,23 @@ The planned Phase 3 feature — **per-version CocoaPods cache isolation** — go
 
 ## Installation
 
-### Via pub global (recommended)
+### One-line install (macOS / Linux)
 
 ```sh
-dart pub global activate fve
+curl -sSL https://assylman.github.io/fve/install.sh | sh
 ```
 
-Ensure Dart's global bin directory is in your `PATH`. If `dart pub global activate` warns you about it, add this to your shell rc:
+Then configure your shell PATH:
 
 ```sh
-export PATH="$HOME/.pub-cache/bin:$PATH"
+fve setup --write   # auto-appends to ~/.zshrc / ~/.bashrc / config.fish
+source ~/.zshrc     # or restart your terminal
 ```
 
 ### From source
 
 ```sh
-git clone https://github.com/yourname/fve.git
+git clone https://github.com/assylman/fve
 cd fve
 dart pub get
 dart compile exe bin/fve.dart -o fve
@@ -107,17 +109,16 @@ sudo mv fve /usr/local/bin/fve
 
 ### Shell integration
 
-After installing `fve`, set up your global `flutter` and `dart` shims by adding the following to your `~/.zshrc`, `~/.bashrc`, or equivalent:
+`$HOME/.fve/current/bin` must be in your PATH for `flutter` and `dart` to resolve through fve. The easiest way:
 
 ```sh
-# fve — Flutter Version & Environment Manager
-export PATH="$HOME/.fve/current/bin:$PATH"
+fve setup --write
 ```
 
-Reload your shell:
+Or add manually to `~/.zshrc` / `~/.bashrc`:
 
 ```sh
-source ~/.zshrc  # or ~/.bashrc
+export PATH="$HOME/.fve/current/bin:$PATH"
 ```
 
 `$HOME/.fve/current` is a symlink that points to whichever Flutter SDK you have set as your global default. Run `fve global <version>` to update it.
@@ -189,16 +190,15 @@ fve keeps everything inside `~/.fve/`:
 ```
 ~/.fve/
 ├── versions/
-│   ├── 3.19.0/          ← Full Flutter SDK (extracted archive)
-│   │   ├── bin/
-│   │   │   ├── flutter
-│   │   │   └── dart
-│   │   └── ...
+│   ├── 3.19.0/          ← Full Flutter SDK
+│   │   └── bin/flutter
 │   └── 3.22.2/          ← Full Flutter SDK
-│       ├── bin/
-│       └── ...
+│       └── bin/flutter
+├── pods/
+│   ├── 3.19.0/          ← CocoaPods cache for Flutter 3.19.0
+│   └── 3.22.2/          ← CocoaPods cache for Flutter 3.22.2
 ├── current -> versions/3.22.2   ← Symlink to the global default
-└── config.json          ← Global configuration (default version, etc.)
+└── config.json          ← Global configuration
 ```
 
 Each version directory is a self-contained Flutter SDK. fve never modifies your system Flutter installation.
@@ -269,6 +269,8 @@ fve use <version> [options]
 |---|---|
 | `-g`, `--global` | Also update the system-wide global default |
 | `--skip-install` | Write `.fverc` even if the version is not yet installed locally |
+| `--skip-pub-get` | Skip running `flutter pub get` after pinning |
+| `--no-vscode` | Skip updating `.vscode/settings.json` |
 
 **Examples**
 
@@ -521,6 +523,44 @@ fve exec -- ./scripts/build.sh
 
 ---
 
+### `fve pod`
+
+Runs CocoaPods commands with a version-isolated cache. Each Flutter version gets its own `~/.fve/pods/<version>/` directory set as `CP_HOME_DIR`.
+
+```
+fve pod install            # pod install with correct cache
+fve pod update             # pod update with correct cache
+fve pod update FirebaseCore # update a single pod
+fve pod cache list         # list all pod caches with disk usage
+fve pod cache clear 3.22.2 # delete pod cache for one version
+fve pod cache clear --all  # delete all pod caches
+```
+
+`fve use <version>` automatically injects a CI-safe Ruby snippet into `ios/Podfile`:
+
+```ruby
+# fve managed — do not edit this block
+_fve_root = File.join(ENV['HOME'], '.fve')
+_fve_pods = File.join(_fve_root, 'pods', '3.22.2')
+ENV['CP_HOME_DIR'] = _fve_pods if Dir.exist?(_fve_root)
+# end fve managed
+```
+
+The `Dir.exist?` guard makes the block a no-op on CI machines without fve — they continue to use `~/.cocoapods` normally.
+
+---
+
+### `fve setup`
+
+Configures your shell to use fve-managed Flutter versions.
+
+```sh
+fve setup           # show the line to add to your shell rc
+fve setup --write   # auto-append to ~/.zshrc / ~/.bashrc / config.fish
+```
+
+---
+
 ### `fve doctor`
 
 Checks your fve installation for common problems and prints actionable remedies.
@@ -539,6 +579,7 @@ Checks performed:
 | Global version set | `~/.fve/current` symlink exists and is valid |
 | PATH | `$HOME/.fve/current/bin` is in `PATH` |
 | Project version | `.fverc` in directory tree, version is installed |
+| iOS / CocoaPods | Podfile injection correct, pod cache initialized |
 | System tools | `git`, `unzip` (and `pod`, `xcode-select` on macOS) |
 
 ---
@@ -587,10 +628,8 @@ git commit -m "chore: pin Flutter 3.22.2 via fve"
 
 ```sh
 # After cloning the repo:
-fve install   # reads .fverc automatically — coming in a future release
-# or:
-fve install 3.22.2   # version shown in .fverc
-fve flutter pub get
+fve install          # reads .fverc and installs the pinned version
+fve use 3.22.2       # injects Podfile, runs pub get, updates VS Code settings
 fve flutter run
 ```
 
@@ -622,17 +661,21 @@ Install fve and the required Flutter version in your CI pipeline before running 
 
 ```yaml
 - name: Install fve
-  run: dart pub global activate fve
+  run: curl -sSL https://assylman.github.io/fve/install.sh | sh
 
 - name: Install Flutter (version from .fverc)
   run: |
+    fve install                   # reads .fverc automatically
     VERSION=$(jq -r .flutter_version .fverc)
-    fve install "$VERSION"
     echo "$HOME/.fve/versions/$VERSION/bin" >> $GITHUB_PATH
 
 - name: Build
   run: flutter build apk --release
 ```
+
+### iOS on CI (Fastlane / Codemagic)
+
+The Podfile injection block is CI-safe — it only activates when `~/.fve` exists. On CI machines without fve, pods use `~/.cocoapods` normally. No changes to your Fastfile needed.
 
 ### Generic shell script
 
@@ -752,7 +795,7 @@ Contributions are welcome. Please open an issue before submitting a pull request
 **Development setup:**
 
 ```sh
-git clone https://github.com/yourname/fve.git
+git clone https://github.com/assylman/fve
 cd fve
 dart pub get
 dart run bin/fve.dart --help
@@ -791,6 +834,12 @@ lib/
       flutter_command.dart
       dart_command.dart
       exec_command.dart
+      spawn_command.dart
+      pod_command.dart
+      config_command.dart
+      setup_command.dart
+      destroy_command.dart
+      api_command.dart
       doctor_command.dart
     models/
       flutter_release.dart   API response models
@@ -800,9 +849,11 @@ lib/
       config_service.dart    Global config (config.json)
       download_service.dart  HTTP download, checksum, extraction
       releases_service.dart  Flutter releases API client
+      pod_service.dart       CocoaPods cache isolation
     utils/
       logger.dart            ANSI terminal output
       platform_utils.dart    Platform / architecture detection
+      tui.dart               ProgressBar + Spinner
 ```
 
 ---

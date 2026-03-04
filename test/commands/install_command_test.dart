@@ -41,6 +41,25 @@ void main() {
     // test. We verify instead that the flag is accepted without a parse error.
   });
 
+  // ── No-args with .fverc ───────────────────────────────────────────────────
+
+  group('fve install — no args with .fverc', () {
+    test('reads version from .fverc when no arg given', () async {
+      env.installVersion('3.22.2');
+      final dir = env.createProjectDir(pinnedVersion: '3.22.2');
+      final result = await env.run(['install'], workingDir: dir.path);
+      expect(result.exitCode, 0);
+      expect(result.output.toLowerCase(), contains('already installed'));
+    });
+
+    test('output mentions the pinned version', () async {
+      env.installVersion('3.22.2');
+      final dir = env.createProjectDir(pinnedVersion: '3.22.2');
+      final result = await env.run(['install'], workingDir: dir.path);
+      expect(result.output, contains('3.22.2'));
+    });
+  });
+
   // ── Help ──────────────────────────────────────────────────────────────────
 
   group('fve install --help', () {

@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../help.dart';
 import '../models/flutter_release.dart';
+import '../models/project_config.dart';
 import '../services/cache_service.dart';
 import '../services/download_service.dart';
 import '../services/releases_service.dart';
@@ -57,14 +58,22 @@ class InstallCommand extends FveCommand {
 
   @override
   Future<void> run() async {
+    // If no version given, try to read it from the nearest .fverc.
+    String versionArg;
     if (argResults!.rest.isEmpty) {
-      usageException(
-        'Please provide a version number or channel name.\n'
-        'Example: fve install 3.22.2',
-      );
+      final projectConfig = ProjectConfig.findForDirectory('.');
+      if (projectConfig == null) {
+        usageException(
+          'Please provide a version number or channel name.\n'
+          'Example: fve install 3.22.2\n'
+          'Or run from a directory with a .fverc to install the pinned version.',
+        );
+      }
+      versionArg = projectConfig.flutterVersion;
+      Logger.dim('Using pinned version from .fverc: $versionArg');
+    } else {
+      versionArg = argResults!.rest.first;
     }
-
-    final versionArg = argResults!.rest.first;
     final force = argResults!['force'] as bool;
     final noGit = argResults!['no-git'] as bool;
     final cache = CacheService()..ensureDirectoriesExist();
