@@ -39,7 +39,9 @@ jobs:
         run: dart pub get
 
       - name: Compile binary
-        run: dart compile exe bin/fve.dart -o build/${{ matrix.artifact }}
+        run: |
+          mkdir -p build
+          dart compile exe bin/fve.dart -o build/${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
