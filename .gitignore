@@ -1,0 +1,27 @@
+# Dart
+.dart_tool/
+.packages
+build/
+# pubspec.lock is committed for CLI apps (reproducible builds)
+
+# Generated files
+*.g.dart
+*.freezed.dart
+
+# Compiled binary
+/bin/fve
+
+# Test coverage
+coverage/
+.dart_tool/test/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# fve itself (if dogfooding)
+.fverc
