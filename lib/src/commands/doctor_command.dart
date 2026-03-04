@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
+import '../services/pod_service.dart';
 import '../utils/logger.dart';
 import 'base_command.dart';
 
@@ -21,6 +22,7 @@ class DoctorCommand extends FveCommand {
     print('');
 
     final cache = CacheService();
+    final cwd = Directory.current.path;
 
     // ── 1. fve home ──────────────────────────────────────────────────────
     _section('fve home');
@@ -89,7 +91,43 @@ class DoctorCommand extends FveCommand {
       Logger.dim('  No .fverc found. Run: fve use <version>');
     }
 
-    // ── 6. System tools ──────────────────────────────────────────────────
+    // ── 6. iOS / CocoaPods ───────────────────────────────────────────────────
+    final pod = PodService();
+    if (pod.hasPodfile(cwd)) {
+      _section('iOS / CocoaPods');
+      if (projectConfig != null) {
+        final version = projectConfig.flutterVersion;
+        final injectedVersion = pod.podfileInjectionVersion(cwd);
+        if (injectedVersion == version) {
+          _check('Podfile injection', true, 'CP_HOME_DIR → ${pod.podCacheDir(version)}');
+        } else if (injectedVersion != null) {
+          _check(
+            'Podfile injection',
+            false,
+            'injected for $injectedVersion, but .fverc pins $version\n'
+            '    Fix: fve use $version',
+          );
+        } else {
+          _check(
+            'Podfile injection',
+            false,
+            'fve block missing\n    Fix: fve use $version',
+          );
+        }
+        final podCacheExists = Directory(pod.podCacheDir(version)).existsSync();
+        _check(
+          'Pod cache for $version',
+          podCacheExists,
+          podCacheExists
+              ? pod.podCacheDir(version)
+              : 'Run: fve pod install',
+        );
+      } else {
+        Logger.dim('  ios/Podfile found. Pin a version first: fve use <version>');
+      }
+    }
+
+    // ── 7. System tools ──────────────────────────────────────────────────
     _section('System tools');
     _checkTool('git', ['--version']);
     _checkTool('unzip', ['-v']);

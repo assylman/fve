@@ -56,6 +56,7 @@ class HelpFormatter {
     _out('');
     _section('TOOLING & DIAGNOSTICS');
     _row('doctor',  'Diagnose your fve environment');
+    _row('setup',   'Configure your shell PATH for fve');
     _row('config',  'View or update global fve settings');
     _row('api',     'JSON output for IDE and script integration');
     _row('destroy', 'Remove the entire fve cache');

@@ -16,6 +16,7 @@ import 'commands/install_command.dart';
 import 'commands/list_command.dart';
 import 'commands/releases_command.dart';
 import 'commands/remove_command.dart';
+import 'commands/setup_command.dart';
 import 'commands/spawn_command.dart';
 import 'commands/use_command.dart';
 import 'help.dart';
@@ -48,6 +49,7 @@ class FveRunner {
       ..addCommand(ConfigCommand())
       ..addCommand(DestroyCommand())
       ..addCommand(ApiCommand())
+      ..addCommand(SetupCommand())
       ..addCommand(DoctorCommand());
 
     try {

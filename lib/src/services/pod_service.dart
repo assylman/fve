@@ -51,6 +51,18 @@ class PodService {
   /// Returns true when [projectDir] contains an `ios/Podfile`.
   bool hasPodfile(String projectDir) => findPodfile(projectDir) != null;
 
+  /// Returns the Flutter version embedded in the fve block of the Podfile,
+  /// or null if no fve block is present.
+  String? podfileInjectionVersion(String projectDir) {
+    final path = findPodfile(projectDir);
+    if (path == null) return null;
+    final content = File(path).readAsStringSync();
+    if (!content.contains(_blockStart)) return null;
+    // The block contains: _fve_pods = File.join(_fve_root, 'pods', '<version>')
+    final match = RegExp("'pods', '([^']+)'").firstMatch(content);
+    return match?.group(1);
+  }
+
   // ── Podfile injection ──────────────────────────────────────────────────────
 
   /// Injects (or replaces) the fve `CP_HOME_DIR` block at the top of the
