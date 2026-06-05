@@ -7,6 +7,7 @@ import '../models/flutter_release.dart';
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
 import '../services/download_service.dart';
+import '../services/lock_service.dart';
 import '../services/releases_service.dart';
 import '../utils/logger.dart';
 import '../utils/tui.dart';
@@ -78,6 +79,26 @@ class InstallCommand extends FveCommand {
     final noGit = argResults!['no-git'] as bool;
     final cache = CacheService()..ensureDirectoriesExist();
 
+    // ── Guard: concurrent install ────────────────────────────────────────────
+    if (!LockService.acquire()) {
+      Logger.error('Another fve operation is already running.');
+      Logger.dim('If this is a stale lock, delete: ${LockService.lockFile}');
+      exit(1);
+    }
+
+    try {
+      await _runInstall(versionArg, force, noGit, cache);
+    } finally {
+      LockService.release();
+    }
+  }
+
+  Future<void> _runInstall(
+    String versionArg,
+    bool force,
+    bool noGit,
+    CacheService cache,
+  ) async {
     // Resolve the actual release metadata (also validates the version exists).
     final resolveSpinner = Spinner('Resolving "$versionArg"');
     resolveSpinner.start();
@@ -120,11 +141,23 @@ class InstallCommand extends FveCommand {
       cache.deleteVersion(version);
     }
 
+    // ── Guard: disk space ────────────────────────────────────────────────────
+    // Git clone: ~200 MB; archive download: ~1 GB. Warn if less than 2 GB free.
+    final requiredMb = noGit ? 1100 : 300;
+    final freeMs = _freeDiskMb(cache.versionDir(version));
+    if (freeMs != null && freeMs < requiredMb) {
+      Logger.warning(
+        'Low disk space: $freeMs MB available, ~$requiredMb MB required.\n'
+        '  Free up space and try again.',
+      );
+      // Warn but do not abort — the user may know what they are doing.
+    }
+
     Logger.bold('\nInstalling Flutter $version…');
     Logger.dim('  channel : ${release.channel}');
     Logger.dim('  arch    : ${release.dartSdkArch}');
     Logger.dim('  dart    : ${release.dartSdkVersion}');
-    print('');
+    Logger.plain('');
 
     final downloader = DownloadService();
 
@@ -135,7 +168,7 @@ class InstallCommand extends FveCommand {
         // git was requested but is not available on this machine.
         Logger.warning('git not found — falling back to pre-built archive (≈1 GB).');
         Logger.dim('  Tip: install git for ~200 MB installs (brew install git).');
-        print('');
+        Logger.plain('');
       }
       await _installViaArchive(downloader, release, destDir);
     }
@@ -151,7 +184,7 @@ class InstallCommand extends FveCommand {
     await downloader.installViaGit(version, destDir);
 
     Logger.success('Flutter $version installed at $destDir');
-    print('');
+    Logger.plain('');
     Logger.dim(
       '  The first `fve flutter` / `fve dart` invocation will fetch',
     );
@@ -162,7 +195,7 @@ class InstallCommand extends FveCommand {
       '  Do NOT run `flutter upgrade` inside a managed version —\n'
       '  use `fve install <new-version>` instead.',
     );
-    print('');
+    Logger.plain('');
     _printNextSteps(version);
   }
 
@@ -191,7 +224,7 @@ class InstallCommand extends FveCommand {
       extractSpinner.start();
       await downloader.extractSdk(archivePath, destDir);
       extractSpinner.stop(done: 'Flutter ${release.version} installed at $destDir');
-      print('');
+      Logger.plain('');
       _printNextSteps(release.version);
     } finally {
       if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
@@ -203,5 +236,37 @@ class InstallCommand extends FveCommand {
   void _printNextSteps(String version) {
     Logger.dim('Set as project version : fve use $version');
     Logger.dim('Set as global default  : fve global $version');
+  }
+
+  /// Returns the available free disk space in MB for the filesystem containing
+  /// [path], or null if it cannot be determined.
+  static int? _freeDiskMb(String path) {
+    try {
+      if (Platform.isWindows) {
+        final drive = path.substring(0, 2);
+        final r = Process.runSync('wmic', [
+          'logicaldisk', 'where', 'DeviceID="$drive"',
+          'get', 'FreeSpace', '/value',
+        ]);
+        final match = RegExp(r'FreeSpace=(\d+)').firstMatch(r.stdout as String);
+        if (match != null) {
+          return int.parse(match.group(1)!) ~/ (1024 * 1024);
+        }
+        return null;
+      }
+      // macOS / Linux: df -k <path>
+      final dir = Directory(path);
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final r = Process.runSync('df', ['-k', path]);
+      if (r.exitCode != 0) return null;
+      final lines = (r.stdout as String).trim().split('\n');
+      if (lines.length < 2) return null;
+      final fields = lines.last.trim().split(RegExp(r'\s+'));
+      if (fields.length < 4) return null;
+      final freeKb = int.tryParse(fields[3]);
+      return freeKb != null ? freeKb ~/ 1024 : null;
+    } catch (_) {
+      return null;
+    }
   }
 }

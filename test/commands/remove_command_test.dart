@@ -99,11 +99,11 @@ void main() {
       );
     });
 
-    test('"uninstall" is an alias for remove', () async {
-      final r = await env.run(['uninstall', '3.22.2', '--force']);
-      expect(r.exitCode, 0);
-    });
-
+    // NOTE: `uninstall` is NOT an alias for `remove` — it is a separate,
+    // destructive command (UninstallCommand) that wipes fve entirely. An
+    // earlier version of this test ran `fve uninstall --force`, which deleted
+    // Platform.resolvedExecutable (the Dart launcher) mid-test-run and broke
+    // the whole toolchain. Do not reintroduce it. `rm` is the real alias:
     test('"rm" is an alias for remove', () async {
       final r = await env.run(['rm', '3.22.2', '--force']);
       expect(r.exitCode, 0);

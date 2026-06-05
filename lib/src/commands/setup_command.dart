@@ -12,58 +12,51 @@ class SetupCommand extends FveCommand {
 
   @override
   String get description =>
-      'Configure your shell to use fve-managed Flutter versions.';
+      'Show the PATH line to add to your shell rc for fve-managed Flutter versions.';
 
   @override
   List<HelpExample> get usageExamples => const [
-        HelpExample('setup', 'Show the line to add to your shell rc'),
-        HelpExample('setup --write', 'Auto-append the PATH export to your shell rc'),
+        HelpExample('setup', 'Show the PATH line to add to your shell rc'),
+        HelpExample('setup --remove', 'Remove the fve PATH entry from your shell rc'),
       ];
 
   SetupCommand() {
     argParser.addFlag(
-      'write',
-      abbr: 'w',
-      help: 'Append the PATH export to your shell rc file automatically.',
+      'remove',
+      abbr: 'r',
+      help: 'Remove the fve PATH entry from your shell rc file.',
       negatable: false,
     );
   }
 
   @override
   Future<void> run() async {
-    final write = argResults!['write'] as bool;
+    final remove = argResults!['remove'] as bool;
     final shell = _detectShell();
     final rcFile = _rcFile(shell);
     final exportLine = _exportLine(shell);
-    final alreadyConfigured = _isAlreadyConfigured(rcFile, shell);
 
     Logger.bold('\nfve shell setup');
-    print('');
+    Logger.plain('');
     Logger.dim('  Shell   : $shell');
     Logger.dim('  RC file : $rcFile');
-    print('');
+    Logger.plain('');
 
-    if (alreadyConfigured) {
-      Logger.success('fve is already configured in $rcFile');
-      Logger.dim('  Restart your shell or run: source $rcFile');
+    if (remove) {
+      _removeFromRc(rcFile);
       return;
     }
 
-    if (write) {
-      _writeToRc(rcFile, exportLine, shell);
-      Logger.success('Written to $rcFile');
-      print('');
-      Logger.dim('  Restart your shell or run:');
-      Logger.dim('    source $rcFile');
-    } else {
-      Logger.info('Add the following to $rcFile:');
-      print('');
-      print('  $exportLine');
-      print('');
-      Logger.dim('  Then restart your shell or run: source $rcFile');
-      print('');
-      Logger.dim('  Or run automatically: fve setup --write');
+    if (_isAlreadyConfigured(rcFile)) {
+      Logger.success('fve PATH is already present in $rcFile');
+      return;
     }
+
+    Logger.info('Add the following line to $rcFile:');
+    Logger.plain('');
+    Logger.plain('  $exportLine');
+    Logger.plain('');
+    Logger.dim('  Then restart your terminal.');
   }
 
   // ── Shell detection ────────────────────────────────────────────────────────
@@ -93,23 +86,45 @@ class SetupCommand extends FveCommand {
     return 'export PATH="\$HOME/.fve/current/bin:\$PATH"';
   }
 
-  bool _isAlreadyConfigured(String rcFile, String shell) {
+  bool _isAlreadyConfigured(String rcFile) {
     final file = File(rcFile);
     if (!file.existsSync()) return false;
-    final content = file.readAsStringSync();
-    // Fish uses fish_add_path; bash/zsh use PATH export.
-    return content.contains('.fve/current/bin');
+    return file.readAsStringSync().contains('.fve/current/bin');
   }
 
-  void _writeToRc(String rcFile, String exportLine, String shell) {
+  void _removeFromRc(String rcFile) {
     final file = File(rcFile);
-    if (!file.parent.existsSync()) {
-      file.parent.createSync(recursive: true);
+    if (!file.existsSync()) {
+      Logger.warning('RC file not found: $rcFile');
+      return;
     }
 
-    final block = '\n# fve — Flutter Version & Environment Manager\n'
-        '$exportLine\n';
+    final original = file.readAsStringSync();
+    final cleaned = original
+        .replaceAll(
+          RegExp(
+            r'\n# fve — Flutter Version & Environment Manager\n[^\n]+\n',
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(r'\n?export PATH="\$HOME/\.fve/current/bin:\$PATH"\n?'),
+          '\n',
+        )
+        .replaceAll(
+          RegExp(r'\n?fish_add_path \$HOME/\.fve/current/bin\n?'),
+          '\n',
+        );
 
-    file.writeAsStringSync(block, mode: FileMode.append);
+    if (cleaned == original) {
+      Logger.warning('No fve PATH entry found in $rcFile');
+      return;
+    }
+
+    file.writeAsStringSync(cleaned);
+    Logger.success('Removed fve PATH entry from $rcFile');
+    Logger.plain('');
+    Logger.dim('  Restart your terminal to apply.');
+    Logger.dim('  Note: the current session PATH is unchanged — open a new terminal.');
   }
 }

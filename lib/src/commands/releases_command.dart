@@ -121,6 +121,10 @@ class ReleasesCommand extends FveCommand {
       stdin.echoMode = true;
       stdin.lineMode = true;
     }
+
+    // Dart's stdin keeps the event loop alive after raw-mode reads.
+    // Exit immediately to avoid a multi-second hang on quit.
+    exit(0);
   }
 
   // ── Page rendering ────────────────────────────────────────────────────────

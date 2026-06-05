@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
 import '../services/pod_service.dart';
@@ -21,7 +22,7 @@ class DoctorCommand extends FveCommand {
   @override
   Future<void> run() async {
     Logger.bold('\nfve doctor');
-    print('');
+    Logger.plain('');
 
     final cache = CacheService();
     final cwd = Directory.current.path;
@@ -67,15 +68,15 @@ class DoctorCommand extends FveCommand {
     final pathEnv = Platform.environment['PATH'] ?? '';
     final fveBinInPath =
         pathEnv.contains(p.join(home, 'current', 'bin'));
-    _check(
-      'fve current/bin is in PATH',
-      fveBinInPath,
-      fveBinInPath
-          ? null
-          : 'Add to your shell rc:\n'
-              '    export PATH="\$HOME/.fve/current/bin:\$PATH"',
-      critical: true,
-    );
+    if (fveBinInPath) {
+      Logger.success('  fve current/bin is in PATH');
+    } else {
+      Logger.warning(
+        '  fve current/bin is not in PATH\n'
+        '    Add to your shell rc:\n'
+        '    export PATH="\$HOME/.fve/current/bin:\$PATH"',
+      );
+    }
 
     // ── 5. Project config ────────────────────────────────────────────────
     _section('Project (current directory)');
@@ -134,17 +135,192 @@ class DoctorCommand extends FveCommand {
       }
     }
 
-    // ── 7. System tools ──────────────────────────────────────────────────
+    // ── 7. Project structure ─────────────────────────────────────────────
+    if (projectConfig != null) {
+      _section('Project structure');
+      _checkProjectStructure(cwd);
+    }
+
+    // ── 8. System tools ──────────────────────────────────────────────────
     _section('System tools');
     _checkTool('git', ['--version']);
     _checkTool('unzip', ['-v']);
     if (Platform.isMacOS) {
       _checkTool('pod', ['--version']);
       _checkTool('xcode-select', ['--print-path']);
+      _checkXcodeVersion();
+      _checkRubyVersion();
+    }
+    if (!Platform.isMacOS) {
+      _checkAndroidSdk();
+      _checkJavaVersion();
     }
 
-    print('');
+    Logger.plain('');
     if (_criticalError) exit(1);
+  }
+
+  // ── Project structure checks ─────────────────────────────────────────────
+
+  void _checkProjectStructure(String cwd) {
+    // 4.1.9 pubspec.yaml missing — reported but not critical. A directory can
+    // legitimately pin a Flutter version via .fverc without being a Flutter
+    // project root, so doctor should surface this without exiting non-zero.
+    final hasPubspec = File(p.join(cwd, 'pubspec.yaml')).existsSync();
+    _check('pubspec.yaml', hasPubspec, hasPubspec ? null : 'Not a Flutter project');
+
+    if (!hasPubspec) return;
+
+    // 4.1.4 .env missing but .env.example exists
+    final hasEnv = File(p.join(cwd, '.env')).existsSync();
+    final hasEnvExample = File(p.join(cwd, '.env.example')).existsSync();
+    if (!hasEnv && hasEnvExample) {
+      Logger.warning('  .env missing but .env.example exists');
+      Logger.dim('    Fix: cp .env.example .env');
+    } else if (hasEnv) {
+      Logger.success('  .env file present');
+    }
+
+    // 4.1.3 build_runner: detect stale generated files
+    final hasBuildYaml = File(p.join(cwd, 'build.yaml')).existsSync();
+    if (hasBuildYaml) {
+      Logger.dim('  build.yaml found (code generation project)');
+      _checkBuildRunnerStaleness(cwd);
+    }
+
+    // 4.1.8 Platform folders
+    _checkPlatformFolders(cwd);
+
+    // 4.1.10 Monorepo / melos
+    final hasMelos = File(p.join(cwd, 'melos.yaml')).existsSync();
+    if (hasMelos) {
+      Logger.dim('  melos.yaml found (monorepo)');
+      _checkMelosPackages(cwd);
+    }
+  }
+
+  void _checkBuildRunnerStaleness(String cwd) {
+    // Heuristic: look for .g.dart files older than their sources.
+    try {
+      final libDir = Directory(p.join(cwd, 'lib'));
+      if (!libDir.existsSync()) return;
+      var staleFound = false;
+      for (final f in libDir.listSync(recursive: true).whereType<File>()) {
+        if (!f.path.endsWith('.g.dart') && !f.path.endsWith('.freezed.dart')) continue;
+        final base = f.path.replaceAll(RegExp(r'\.(g|freezed)\.dart$'), '.dart');
+        final source = File(base);
+        if (source.existsSync() && source.lastModifiedSync().isAfter(f.lastModifiedSync())) {
+          staleFound = true;
+          break;
+        }
+      }
+      if (staleFound) {
+        Logger.warning('  Stale generated files detected');
+        Logger.dim('    Fix: dart run build_runner build');
+      } else {
+        Logger.success('  Generated files appear up to date');
+      }
+    } catch (_) {}
+  }
+
+  void _checkPlatformFolders(String cwd) {
+    final platforms = {
+      'android': 'Android',
+      'ios': 'iOS',
+      'web': 'Web',
+      'linux': 'Linux desktop',
+      'macos': 'macOS desktop',
+      'windows': 'Windows desktop',
+    };
+    final present = <String>[];
+    final missing = <String>[];
+    for (final entry in platforms.entries) {
+      if (Directory(p.join(cwd, entry.key)).existsSync()) {
+        present.add(entry.value);
+      } else {
+        missing.add(entry.value);
+      }
+    }
+    if (present.isNotEmpty) {
+      Logger.success('  Platforms enabled: ${present.join(', ')}');
+    }
+    if (missing.isNotEmpty) {
+      Logger.dim('  Platforms not added: ${missing.join(', ')}');
+    }
+  }
+
+  void _checkMelosPackages(String cwd) {
+    try {
+      final result = Process.runSync('melos', ['list', '--json'], workingDirectory: cwd);
+      if (result.exitCode == 0) {
+        Logger.success('  melos found packages');
+      } else {
+        Logger.dim('  Run melos bootstrap to initialise the monorepo');
+      }
+    } catch (_) {
+      Logger.dim('  melos not installed: dart pub global activate melos');
+    }
+  }
+
+  // ── Platform tool checks ─────────────────────────────────────────────────
+
+  void _checkXcodeVersion() {
+    try {
+      final r = Process.runSync('xcodebuild', ['-version']);
+      if (r.exitCode == 0) {
+        final first = (r.stdout as String).trim().split('\n').first;
+        final match = RegExp(r'Xcode (\d+)').firstMatch(first);
+        final major = int.tryParse(match?.group(1) ?? '') ?? 0;
+        if (major >= 14) {
+          Logger.success('  Xcode version: $first');
+        } else {
+          Logger.warning('  Xcode $major may be too old for recent Flutter versions');
+          Logger.dim('    Recommended: Xcode 14+');
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _checkRubyVersion() {
+    try {
+      final r = Process.runSync('ruby', ['--version']);
+      if (r.exitCode == 0) {
+        final ver = (r.stdout as String).trim().split('\n').first;
+        final match = RegExp(r'ruby (\d+)\.(\d+)').firstMatch(ver);
+        final major = int.tryParse(match?.group(1) ?? '') ?? 0;
+        final minor = int.tryParse(match?.group(2) ?? '') ?? 0;
+        if (major > 2 || (major == 2 && minor >= 6)) {
+          Logger.success('  Ruby: $ver');
+        } else {
+          Logger.warning('  Ruby version may be too old for CocoaPods');
+          Logger.dim('    Recommended: Ruby 2.6+');
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _checkAndroidSdk() {
+    final androidHome =
+        Platform.environment['ANDROID_HOME'] ??
+        Platform.environment['ANDROID_SDK_ROOT'];
+    if (androidHome != null && Directory(androidHome).existsSync()) {
+      Logger.success('  ANDROID_HOME: $androidHome');
+    } else {
+      Logger.warning('  ANDROID_HOME not set or directory not found');
+      Logger.dim('    Set ANDROID_HOME to your Android SDK path.');
+    }
+  }
+
+  void _checkJavaVersion() {
+    try {
+      final r = Process.runSync('java', ['-version']);
+      // java prints version to stderr
+      final ver = (r.stderr as String).trim().split('\n').first;
+      Logger.success('  Java: $ver');
+    } catch (_) {
+      Logger.warning('  Java not found — needed for Android builds');
+      Logger.dim('    Install JDK 17 or later.');
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

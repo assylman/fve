@@ -25,3 +25,6 @@ coverage/
 
 # fve itself (if dogfooding)
 .fverc
+
+# Local notes
+fve_test_cases.txt

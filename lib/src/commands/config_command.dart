@@ -63,13 +63,13 @@ class ConfigCommand extends FveCommand {
   void _printAll(ConfigService config) {
     Logger.header('fve configuration');
     Logger.dim('  ${CacheService.globalConfigFile}');
-    print('');
+    Logger.plain('');
 
     _row('default-version',    config.getDefaultVersion() ?? '(none)');
     _row('vscode-integration', '${config.getVsCodeIntegration()}');
     _row('auto-pub-get',       '${config.getAutoPubGet()}');
 
-    print('');
+    Logger.plain('');
     Logger.dim('  Use fve config --[no-]<setting> to change a value.');
   }
 

@@ -19,9 +19,14 @@ void main() {
       expect(r.exitCode, 0);
     });
 
-    test('mentions --write flag', () async {
+    test('mentions --remove flag', () async {
       final r = await env.run(['setup', '--help']);
-      expect(r.output, contains('write'));
+      expect(r.output, contains('remove'));
+    });
+
+    test('does not mention --write flag', () async {
+      final r = await env.run(['setup', '--help']);
+      expect(r.output, isNot(contains('--write')));
     });
   });
 
@@ -40,7 +45,6 @@ void main() {
 
     test('mentions the shell rc file', () async {
       final r = await env.run(['setup']);
-      // Should mention some kind of rc file path.
       expect(
         r.output,
         anyOf(contains('zshrc'), contains('bashrc'), contains('profile'),
@@ -48,7 +52,7 @@ void main() {
       );
     });
 
-    test('does not modify any files without --write', () async {
+    test('does not modify any files', () async {
       final zshrc = File(p.join(env.homePath, '.zshrc'));
       final bashrc = File(p.join(env.homePath, '.bashrc'));
       await env.run(['setup']);
@@ -57,49 +61,39 @@ void main() {
     });
   });
 
-  // ── --write: appends to shell rc ──────────────────────────────────────────
+  // ── --remove: strips PATH entry from rc ──────────────────────────────────
 
-  group('fve setup --write', () {
-    test('exits 0', () async {
-      final r = await env.run(['setup', '--write']);
+  group('fve setup --remove', () {
+    test('exits 0 when no rc file exists', () async {
+      final r = await env.run(['setup', '--remove']);
       expect(r.exitCode, 0);
     });
 
-    test('creates the shell rc file', () async {
-      await env.run(['setup', '--write']);
-      // At least one rc file should now exist in the home dir.
-      final rcFiles = ['.zshrc', '.bashrc', '.profile']
-          .map((f) => File(p.join(env.homePath, f)))
-          .toList();
-      expect(rcFiles.any((f) => f.existsSync()), isTrue);
+    test('removes fve block from rc file', () async {
+      // Manually write an rc file with a fve block.
+      final zshrc = File(p.join(env.homePath, '.zshrc'))
+        ..writeAsStringSync(
+          'export FOO=bar\n'
+          '\n# fve — Flutter Version & Environment Manager\n'
+          r'export PATH="$HOME/.fve/current/bin:$PATH"'
+          '\n',
+        );
+
+      await env.run(['setup', '--remove'],
+          extraEnv: {'SHELL': '/bin/zsh'});
+
+      final content = zshrc.readAsStringSync();
+      expect(content, isNot(contains('.fve/current/bin')));
+      expect(content, contains('export FOO=bar'));
     });
 
-    test('written rc contains .fve/current/bin', () async {
-      await env.run(['setup', '--write']);
-      final rcFiles = ['.zshrc', '.bashrc', '.profile']
-          .map((f) => File(p.join(env.homePath, f)))
-          .where((f) => f.existsSync())
-          .toList();
-      expect(rcFiles, isNotEmpty);
-      final content = rcFiles.first.readAsStringSync();
-      expect(content, contains('.fve/current/bin'));
-    });
+    test('warns when no fve entry found in rc', () async {
+      File(p.join(env.homePath, '.zshrc'))
+          .writeAsStringSync('export FOO=bar\n');
 
-    test('running --write twice does not duplicate the entry', () async {
-      await env.run(['setup', '--write']);
-      await env.run(['setup', '--write']);
-      final rcFiles = ['.zshrc', '.bashrc', '.profile']
-          .map((f) => File(p.join(env.homePath, f)))
-          .where((f) => f.existsSync())
-          .toList();
-      final content = rcFiles.first.readAsStringSync();
-      // Should only contain one PATH line, not two.
-      expect('.fve/current/bin'.allMatches(content).length, 1);
-    });
-
-    test('prints success message', () async {
-      final r = await env.run(['setup', '--write']);
-      expect(r.output.toLowerCase(), contains('written'));
+      final r = await env.run(['setup', '--remove'],
+          extraEnv: {'SHELL': '/bin/zsh'});
+      expect(r.output.toLowerCase(), contains('no fve'));
     });
   });
 }

@@ -30,7 +30,7 @@ class CurrentCommand extends FveCommand {
       Logger.dim('  project : (none — no .fverc found in directory tree)');
     }
 
-    print('');
+    Logger.plain('');
 
     if (globalVersion != null) {
       Logger.plain('  global  : $globalVersion');
@@ -39,7 +39,7 @@ class CurrentCommand extends FveCommand {
       Logger.dim('  global  : (none — run `fve global <version>` to set one)');
     }
 
-    print('');
+    Logger.plain('');
 
     // Show effective version.
     final effective = projectVersion ?? globalVersion;

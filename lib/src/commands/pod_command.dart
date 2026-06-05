@@ -72,11 +72,11 @@ class _PodInstallCommand extends FveCommand {
 
     Logger.info('Running pod install  [Flutter $version]');
     Logger.dim('  CP_HOME_DIR → ${pod.podCacheDir(version)}');
-    print('');
+    Logger.plain('');
 
     final exitCode = await pod.podInstall(projectDir, version);
 
-    print('');
+    Logger.plain('');
     if (exitCode != 0) {
       Logger.error('pod install failed (exit $exitCode).');
       exit(exitCode);
@@ -118,11 +118,11 @@ class _PodUpdateCommand extends FveCommand {
 
     Logger.info('Running $label  [Flutter $version]');
     Logger.dim('  CP_HOME_DIR → ${pod.podCacheDir(version)}');
-    print('');
+    Logger.plain('');
 
     final exitCode = await pod.podUpdate(projectDir, version, podName: podName);
 
-    print('');
+    Logger.plain('');
     if (exitCode != 0) {
       Logger.error('$label failed (exit $exitCode).');
       exit(exitCode);
@@ -172,7 +172,7 @@ class _PodCacheListCommand extends FveCommand {
       Logger.plain('  ${entry.version.padRight(14)} $size');
       Logger.dim('    ${entry.path}');
     }
-    print('');
+    Logger.plain('');
   }
 
   String _formatBytes(int bytes) {

@@ -4,6 +4,13 @@ import 'package:path/path.dart' as p;
 
 import '../utils/platform_utils.dart';
 
+/// Formats a kilobyte count into a human-readable string (KB / MB / GB).
+String formatSizeKb(int kb) {
+  if (kb >= 1024 * 1024) return '${(kb / 1024 / 1024).toStringAsFixed(1)} GB';
+  if (kb >= 1024) return '${(kb / 1024).toStringAsFixed(1)} MB';
+  return '$kb KB';
+}
+
 /// Manages the `~/.fve/` directory layout.
 class CacheService {
   /// Root directory for all fve data.
@@ -84,6 +91,24 @@ class CacheService {
     final link = Link(currentLink);
     if (link.existsSync()) link.deleteSync();
     link.createSync(target);
+  }
+
+  /// Returns disk usage in KB for each installed version in [versions].
+  /// Runs a single `du -sk` process for all paths at once.
+  Map<String, int> versionSizesKb(List<String> versions) {
+    if (versions.isEmpty) return {};
+    final paths = versions.map(versionDir).toList();
+    final result = Process.runSync('du', ['-sk', ...paths]);
+    if (result.exitCode != 0) return {};
+    final sizes = <String, int>{};
+    for (final line in (result.stdout as String).trim().split('\n')) {
+      final tab = line.indexOf('\t');
+      if (tab < 0) continue;
+      final kb = int.tryParse(line.substring(0, tab)) ?? 0;
+      final path = line.substring(tab + 1);
+      sizes[p.basename(path)] = kb;
+    }
+    return sizes;
   }
 
   /// Deletes the SDK directory for [version].

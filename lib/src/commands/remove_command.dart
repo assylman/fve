@@ -3,7 +3,10 @@ import 'dart:io';
 import '../help.dart';
 import '../services/cache_service.dart';
 import '../services/config_service.dart';
+import '../services/pod_service.dart';
+import '../services/snapshot_service.dart';
 import '../utils/logger.dart';
+import '../utils/version_validator.dart';
 import 'base_command.dart';
 
 class RemoveCommand extends FveCommand {
@@ -11,7 +14,7 @@ class RemoveCommand extends FveCommand {
   String get name => 'remove';
 
   @override
-  List<String> get aliases => ['uninstall', 'rm'];
+  List<String> get aliases => ['rm'];
 
   @override
   String get description => 'Remove one or all cached Flutter SDK versions.';
@@ -64,7 +67,15 @@ class RemoveCommand extends FveCommand {
           'Example: fve remove 3.19.0');
     }
 
-    await _removeSingle(argResults!.rest.first, cache, force);
+    final version = argResults!.rest.first;
+    if (!VersionValidator.isValid(version)) {
+      usageException(
+        'Invalid version "$version". Expected a semantic version '
+        '(e.g. 3.24.0) or a channel (${VersionValidator.channels.join(', ')}).',
+      );
+    }
+
+    await _removeSingle(version, cache, force);
   }
 
   // ── Single version ────────────────────────────────────────────────────────
@@ -101,6 +112,8 @@ class RemoveCommand extends FveCommand {
 
     Logger.plain('Removing Flutter $version…');
     cache.deleteVersion(version);
+    PodService().clearCache(version); // remove orphaned pod cache (2.3.4)
+    SnapshotService().removeVersionSnapshots(version); // remove snapshots (3.3.5)
     Logger.success('Flutter $version removed.');
   }
 
@@ -136,9 +149,13 @@ class RemoveCommand extends FveCommand {
       ConfigService().clearDefaultVersion();
     }
 
+    final pod = PodService();
+    final snapshots = SnapshotService();
     for (final v in versions) {
       Logger.plain('  Removing $v…');
       cache.deleteVersion(v);
+      pod.clearCache(v);       // remove orphaned pod cache (2.3.4)
+      snapshots.removeVersionSnapshots(v); // remove snapshots (3.3.5)
     }
 
     Logger.success('Removed ${versions.length} version(s).');

@@ -4,6 +4,7 @@ import '../help.dart';
 import '../services/cache_service.dart';
 import '../services/config_service.dart';
 import '../utils/logger.dart';
+import '../utils/version_validator.dart';
 import 'base_command.dart';
 
 class GlobalCommand extends FveCommand {
@@ -61,6 +62,12 @@ class GlobalCommand extends FveCommand {
     }
 
     final version = argResults!.rest.first;
+    if (!VersionValidator.isValid(version)) {
+      usageException(
+        'Invalid version "$version". Expected a semantic version '
+        '(e.g. 3.24.0) or a channel (${VersionValidator.channels.join(', ')}).',
+      );
+    }
 
     if (!cache.isInstalled(version)) {
       Logger.error('Flutter $version is not installed.');
@@ -72,7 +79,7 @@ class GlobalCommand extends FveCommand {
     config.setDefaultVersion(version);
 
     Logger.success('Global Flutter version set to $version');
-    print('');
+    Logger.plain('');
     Logger.dim('Make sure your PATH includes:');
     Logger.dim('  export PATH="\$HOME/.fve/current/bin:\$PATH"');
   }

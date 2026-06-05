@@ -78,8 +78,10 @@ class DownloadService {
   Future<void> verifySha256(String filePath, String expectedSha256) async {
     if (expectedSha256.isEmpty) return;
 
-    final bytes = await File(filePath).readAsBytes();
-    final actual = sha256.convert(bytes).toString();
+    // Stream the file through the hash in chunks so we never hold the entire
+    // (potentially >1 GB) archive in memory.
+    final digest = await sha256.bind(File(filePath).openRead()).first;
+    final actual = digest.toString();
 
     if (actual != expectedSha256) {
       throw Exception(
@@ -189,7 +191,7 @@ class DownloadService {
       '  Engine binaries (~400 MB) download automatically'
       ' on first flutter / dart run.',
     );
-    print('');
+    Logger.plain('');
 
     // --filter=blob:none tells the server to skip binary file blobs until
     // they are actually accessed, reducing the initial transfer by ~40%.

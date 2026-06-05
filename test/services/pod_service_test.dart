@@ -108,7 +108,7 @@ void main() {
 
     test('block is conditional on ~/.fve existence (Dir.exist? guard)', () {
       pod.injectPodfile(tempDir.path, '3.22.2');
-      expect(podfile.readAsStringSync(), contains("Dir.exist?"));
+      expect(podfile.readAsStringSync(), contains('Dir.exist?'));
     });
 
     test('original Podfile content is preserved after the block', () {

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../utils/logger.dart';
+import '../utils/version_validator.dart';
 
 const _configFileName = '.fverc';
 
@@ -14,7 +15,7 @@ class ProjectConfig {
 
   factory ProjectConfig.fromJson(Map<String, dynamic> json) {
     return ProjectConfig(
-      flutterVersion: json['flutter_version'] as String,
+      flutterVersion: VersionValidator.check(json['flutter_version'] as String),
     );
   }
 
@@ -28,8 +29,25 @@ class ProjectConfig {
   }
 
   /// Walks up from [startDir] looking for a `.fverc` file.
+  ///
+  /// The `FVE_FLUTTER_VERSION` environment variable takes precedence over
+  /// the config file, allowing CI pipelines to override the version without
+  /// modifying project files (test case 5.9).
+  ///
   /// Returns null if none is found.
   static ProjectConfig? findForDirectory(String startDir) {
+    // 5.9 — environment variable override.
+    final envVersion = Platform.environment['FVE_FLUTTER_VERSION'];
+    if (envVersion != null && envVersion.isNotEmpty) {
+      if (VersionValidator.isValid(envVersion)) {
+        return ProjectConfig(flutterVersion: envVersion);
+      }
+      Logger.warning(
+        'Ignoring FVE_FLUTTER_VERSION="$envVersion" — not a valid version '
+        'or channel.',
+      );
+    }
+
     var current = Directory(startDir);
     while (true) {
       final file = File(p.join(current.path, _configFileName));

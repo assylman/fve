@@ -20,6 +20,11 @@ final String fveProjectRoot = () {
   }
 }();
 
+/// The Dart launcher that runs the test process — the same executable that
+/// `runFve` spawns subprocesses with (`Platform.resolvedExecutable`). Used to
+/// assert that destructive commands never delete it.
+final String dartLauncherPath = Platform.resolvedExecutable;
+
 // ── Result type ───────────────────────────────────────────────────────────────
 
 /// The captured output of a single fve subprocess invocation.

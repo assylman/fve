@@ -6,9 +6,12 @@ import 'package:path/path.dart' as p;
 import '../help.dart';
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
+import '../services/compat_service.dart';
 import '../services/config_service.dart';
 import '../services/pod_service.dart';
+import '../services/snapshot_service.dart';
 import '../utils/logger.dart';
+import '../utils/version_validator.dart';
 import 'base_command.dart';
 
 class UseCommand extends FveCommand {
@@ -57,6 +60,12 @@ class UseCommand extends FveCommand {
         'no-vscode',
         help: 'Skip updating .vscode/settings.json.',
         negatable: false,
+      )
+      ..addFlag(
+        'force',
+        abbr: 'f',
+        help: 'Bypass pre-switch dependency compatibility check.',
+        negatable: false,
       );
   }
 
@@ -68,10 +77,17 @@ class UseCommand extends FveCommand {
     }
 
     final version = argResults!.rest.first;
+    if (!VersionValidator.isValid(version)) {
+      usageException(
+        'Invalid version "$version". Expected a semantic version '
+        '(e.g. 3.24.0) or a channel (${VersionValidator.channels.join(', ')}).',
+      );
+    }
     final setGlobal = argResults!['global'] as bool;
     final skipInstall = argResults!['skip-install'] as bool;
     final skipPubGet = argResults!['skip-pub-get'] as bool;
     final noVsCode = argResults!['no-vscode'] as bool;
+    final force = argResults!['force'] as bool;
 
     final cache = CacheService();
     final config = ConfigService();
@@ -83,9 +99,46 @@ class UseCommand extends FveCommand {
       exit(1);
     }
 
+    // ── Pre-switch compatibility check (3.1.x) ───────────────────────────────
+    if (!force && !skipInstall) {
+      final incompatible =
+          await CompatService().check(cwd, version, force: force);
+      if (incompatible.isNotEmpty) {
+        Logger.warning('Dependency compatibility issues detected:');
+        for (final r in incompatible) {
+          Logger.plain('  ✗ ${r.package}: ${r.reason}');
+        }
+        Logger.dim('  Use --force to switch anyway.');
+        Logger.dim('  Run: fve migrate --to $version for upgrade paths.');
+        if (!Logger.isCI) {
+          stdout.write('\nSwitch anyway? [y/N] ');
+          final answer = stdin.readLineSync()?.trim().toLowerCase();
+          if (answer != 'y' && answer != 'yes') {
+            Logger.plain('Aborted.');
+            exit(0);
+          }
+        } else {
+          // In CI, log warning but continue so builds don't hang.
+          Logger.warning('Continuing despite compatibility warnings (CI mode).');
+        }
+      }
+    }
+
+    // Snapshot the current pubspec.lock for the PREVIOUS version before switching.
+    final previousConfig = ProjectConfig.findForDirectory(cwd);
+    if (previousConfig != null && previousConfig.flutterVersion != version) {
+      SnapshotService().save(cwd, previousConfig.flutterVersion);
+    }
+
     // Write .fverc.
     ProjectConfig(flutterVersion: version).saveToDirectory(cwd);
     Logger.success('Pinned Flutter $version → $cwd/.fverc');
+
+    // Restore the pubspec.lock snapshot for the new version if one exists.
+    final restored = SnapshotService().restore(cwd, version);
+    if (restored) {
+      Logger.dim('  Restored pubspec.lock snapshot for Flutter $version');
+    }
 
     // Inject CP_HOME_DIR block into ios/Podfile if the project has one.
     final pod = PodService();
@@ -102,7 +155,7 @@ class UseCommand extends FveCommand {
       Logger.success('Global default set to Flutter $version');
     }
 
-    print('');
+    Logger.plain('');
 
     // VS Code settings.json integration.
     final vsCodeEnabled = !noVsCode && config.getVsCodeIntegration();
