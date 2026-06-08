@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
 import '../help.dart';
 import '../runner.dart';
@@ -12,6 +13,16 @@ import 'base_command.dart';
 ///
 /// SDKs, caches, and config files are never touched during upgrade (12.2, 12.3).
 class UpgradeCommand extends FveCommand {
+  final http.Client _client;
+
+  UpgradeCommand({http.Client? client}) : _client = client ?? http.Client() {
+    argParser.addFlag(
+      'check',
+      help: 'Only check for updates; do not install.',
+      negatable: false,
+    );
+  }
+
   @override
   String get name => 'upgrade';
 
@@ -23,14 +34,6 @@ class UpgradeCommand extends FveCommand {
         HelpExample('upgrade', 'Download and install the latest fve release'),
         HelpExample('upgrade --check', 'Check if a newer version is available without installing'),
       ];
-
-  UpgradeCommand() {
-    argParser.addFlag(
-      'check',
-      help: 'Only check for updates; do not install.',
-      negatable: false,
-    );
-  }
 
   static const _githubApiUrl =
       'https://api.github.com/repos/assylman/fve/releases/latest';
@@ -46,7 +49,7 @@ class UpgradeCommand extends FveCommand {
     // ── Fetch latest release info ────────────────────────────────────────────
     late Map<String, dynamic> releaseJson;
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse(_githubApiUrl),
         headers: {'Accept': 'application/vnd.github+json'},
       );
@@ -107,11 +110,25 @@ class UpgradeCommand extends FveCommand {
     final downloadUrl = asset['browser_download_url'] as String;
     final binaryPath = Platform.resolvedExecutable;
 
+    // Guard: only replace the binary when we are genuinely running from the
+    // compiled `fve` executable. Under `dart run bin/fve.dart` (development,
+    // tests) Platform.resolvedExecutable is the Dart launcher — overwriting it
+    // would corrupt the user's Dart/Flutter SDK.
+    if (p.basename(binaryPath) != 'fve') {
+      Logger.warning(
+        'Refusing to self-upgrade: fve is running via '
+        '"${p.basename(binaryPath)}", not the installed fve binary.',
+      );
+      Logger.dim('  A new version ($latestTag) is available. Install it from:');
+      Logger.dim('  https://github.com/assylman/fve/releases');
+      return;
+    }
+
     Logger.info('Downloading fve $latestTag…');
 
     final tempFile = File('${binaryPath}_fve_upgrade_tmp');
     try {
-      final response = await http.get(Uri.parse(downloadUrl));
+      final response = await _client.get(Uri.parse(downloadUrl));
       if (response.statusCode != 200) {
         Logger.error('Download failed (HTTP ${response.statusCode}).');
         exit(1);

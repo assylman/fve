@@ -39,8 +39,15 @@ String get platformKey {
   }
 }
 
-String get releasesJsonUrl =>
-    'https://storage.googleapis.com/flutter_infra_release/releases/releases_$platformKey.json';
+/// URL of the Flutter releases manifest for the current platform.
+///
+/// Honours the `FVE_RELEASES_URL` environment variable so CI and tests can
+/// point fve at a local/offline manifest instead of the live Google endpoint.
+String get releasesJsonUrl {
+  final override = Platform.environment['FVE_RELEASES_URL'];
+  if (override != null && override.isNotEmpty) return override;
+  return 'https://storage.googleapis.com/flutter_infra_release/releases/releases_$platformKey.json';
+}
 
 String get flutterBinaryName =>
     Platform.isWindows ? 'flutter.bat' : 'flutter';

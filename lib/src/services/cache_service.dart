@@ -13,8 +13,15 @@ String formatSizeKb(int kb) {
 
 /// Manages the `~/.fve/` directory layout.
 class CacheService {
+  /// Test-only override for [fveHome]. When non-null it fully replaces the
+  /// HOME-derived path so unit tests can isolate fve's data directory without
+  /// spawning a subprocess. Production code never sets this; always reset it to
+  /// null in test tearDown.
+  static String? fveHomeOverride;
+
   /// Root directory for all fve data.
   static String get fveHome {
+    if (fveHomeOverride != null) return fveHomeOverride!;
     final home =
         Platform.environment['HOME'] ??
         Platform.environment['USERPROFILE'] ??

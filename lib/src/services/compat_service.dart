@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
+import 'package:pub_semver/pub_semver.dart';
+import 'package:yaml/yaml.dart';
 
 /// Result of a single package compatibility check.
 class CompatResult {
@@ -48,18 +50,8 @@ class CompatService {
     final results = <CompatResult>[];
 
     for (final entry in deps.entries) {
-      final name = entry.key;
-      final constraint = entry.value;
-
-      // Skip git/path dependencies (3.1.8).
-      if (constraint.startsWith('git:') ||
-          constraint.startsWith('path:') ||
-          constraint.contains('git:') ||
-          constraint.contains('path:')) {
-        continue;
-      }
-
-      final result = await _checkPackage(name, constraint, flutterVersion);
+      final result =
+          await _checkPackage(entry.key, entry.value, flutterVersion);
       if (result != null && !result.compatible) {
         results.add(result);
       }
@@ -70,36 +62,38 @@ class CompatService {
 
   // ── pubspec.yaml parsing ───────────────────────────────────────────────────
 
-  /// Very lightweight YAML parser that extracts top-level dependency entries
+  /// Extracts hosted package dependencies (name → version constraint string)
   /// from the `dependencies:` and `dev_dependencies:` sections.
-  Map<String, String> _parseDependencies(String yaml) {
+  ///
+  /// Uses the `yaml` package for correct parsing. Dependencies expressed as a
+  /// map (git/path/sdk/hosted overrides) are skipped — they can't be checked
+  /// against pub.dev (3.1.8). The Flutter SDK pseudo-deps are also skipped.
+  /// Returns an empty map on malformed YAML (check is silently skipped).
+  Map<String, String> _parseDependencies(String yamlText) {
     final deps = <String, String>{};
-    var inDeps = false;
 
-    for (final rawLine in yaml.split('\n')) {
-      final line = rawLine;
+    dynamic doc;
+    try {
+      doc = loadYaml(yamlText);
+    } catch (_) {
+      return deps; // malformed — skip the check rather than crash
+    }
+    if (doc is! Map) return deps;
 
-      // Start of a relevant section.
-      if (line.trimRight() == 'dependencies:' ||
-          line.trimRight() == 'dev_dependencies:') {
-        inDeps = true;
-        continue;
+    for (final section in const ['dependencies', 'dev_dependencies']) {
+      final node = doc[section];
+      if (node is! Map) continue;
+
+      for (final entry in node.entries) {
+        final name = entry.key.toString();
+        if (name == 'flutter' || name == 'flutter_test') continue;
+
+        final value = entry.value;
+        // Map-form deps (git:/path:/sdk:/hosted:) can't be checked — skip.
+        if (value is Map) continue;
+        // A bare `package:` with no value means "any".
+        deps[name] = value == null ? 'any' : value.toString();
       }
-
-      // New top-level section.
-      if (inDeps && line.isNotEmpty && !line.startsWith(' ') && !line.startsWith('\t')) {
-        inDeps = false;
-      }
-
-      if (!inDeps) continue;
-
-      // Lines like "  package_name: ^1.2.3" or "  package_name: any"
-      final match = RegExp(r'^\s{2,4}(\w[\w_-]*):\s*(.*)$').firstMatch(line);
-      if (match == null) continue;
-      final name = match.group(1)!;
-      final val = match.group(2)!.trim();
-      if (name == 'flutter' || name == 'flutter_test') continue;
-      if (val.isNotEmpty) deps[name] = val;
     }
 
     return deps;
@@ -163,59 +157,18 @@ class CompatService {
 
   // ── Constraint matching ────────────────────────────────────────────────────
 
-  /// Very simplified constraint checker: handles `>=X.Y.Z`, `>=X.Y.Z <A.B.C`,
-  /// and `any`.
+  /// Returns true when [version] satisfies the pub [constraint], using the
+  /// same `pub_semver` library pub itself uses — so `^`, exact pins, ranges
+  /// (`>=3.0.0 <4.0.0`), and `any` are all handled correctly.
+  ///
+  /// If either side can't be parsed (e.g. [version] is a channel name like
+  /// `stable`, or the constraint is malformed) we can't disprove
+  /// compatibility, so we treat it as compatible (unknown, not a failure).
   bool _satisfiesConstraint(String version, String constraint) {
-    if (constraint.trim() == 'any') return true;
-
-    final parts = version.split('.').map(int.tryParse).toList();
-    if (parts.any((p) => p == null)) return true; // can't parse
-
-    final v = _VersionTuple(parts[0]!, parts.length > 1 ? parts[1]! : 0,
-        parts.length > 2 ? parts[2]! : 0);
-
-    final ranges = constraint.split(' ').where((s) => s.isNotEmpty).toList();
-    for (final range in ranges) {
-      final geMatch = RegExp(r'^>=(\d+)\.(\d+)\.(\d+)').firstMatch(range);
-      final gtMatch = RegExp(r'^>(\d+)\.(\d+)\.(\d+)').firstMatch(range);
-      final ltMatch = RegExp(r'^<(\d+)\.(\d+)\.(\d+)').firstMatch(range);
-      final leMatch = RegExp(r'^<=(\d+)\.(\d+)\.(\d+)').firstMatch(range);
-
-      if (geMatch != null) {
-        final bound = _VersionTuple(int.parse(geMatch.group(1)!),
-            int.parse(geMatch.group(2)!), int.parse(geMatch.group(3)!));
-        if (v < bound) return false;
-      } else if (gtMatch != null) {
-        final bound = _VersionTuple(int.parse(gtMatch.group(1)!),
-            int.parse(gtMatch.group(2)!), int.parse(gtMatch.group(3)!));
-        if (v <= bound) return false;
-      } else if (ltMatch != null) {
-        final bound = _VersionTuple(int.parse(ltMatch.group(1)!),
-            int.parse(ltMatch.group(2)!), int.parse(ltMatch.group(3)!));
-        if (v >= bound) return false;
-      } else if (leMatch != null) {
-        final bound = _VersionTuple(int.parse(leMatch.group(1)!),
-            int.parse(leMatch.group(2)!), int.parse(leMatch.group(3)!));
-        if (v > bound) return false;
-      }
+    try {
+      return VersionConstraint.parse(constraint).allows(Version.parse(version));
+    } catch (_) {
+      return true;
     }
-    return true;
   }
-}
-
-class _VersionTuple implements Comparable<_VersionTuple> {
-  final int major, minor, patch;
-  const _VersionTuple(this.major, this.minor, this.patch);
-
-  @override
-  int compareTo(_VersionTuple other) {
-    if (major != other.major) return major.compareTo(other.major);
-    if (minor != other.minor) return minor.compareTo(other.minor);
-    return patch.compareTo(other.patch);
-  }
-
-  bool operator <(_VersionTuple other) => compareTo(other) < 0;
-  bool operator <=(_VersionTuple other) => compareTo(other) <= 0;
-  bool operator >(_VersionTuple other) => compareTo(other) > 0;
-  bool operator >=(_VersionTuple other) => compareTo(other) >= 0;
 }
