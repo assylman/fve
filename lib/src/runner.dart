@@ -28,7 +28,7 @@ import 'commands/upgrade_command.dart';
 import 'commands/use_command.dart';
 import 'help.dart';
 
-const kFveVersion = '0.1.0';
+const kFveVersion = '0.2.0';
 
 class FveRunner {
   Future<void> run(List<String> args) async {

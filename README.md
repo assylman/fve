@@ -23,6 +23,9 @@ This happens on every context-switch between Flutter versions. On large projects
 
 - **Per-project version pinning** — a `.fverc` file in your repo pins every developer and CI machine to the exact same Flutter version automatically. No manual PATH changes. No "works on my machine."
 - **Isolated CocoaPods caches** — each Flutter version gets its own pod cache (`~/.fve/pods/<version>/`). Switching versions reuses the existing cache for that version instantly. No clean, no rebuild.
+- **Self-healing spec index** — when `pod install` fails because the CocoaPods spec index is out of date (`could not find compatible versions for pod …`), fve detects it and automatically retries once with `--repo-update`. Only the missing/changed pods are fetched; cached pods are reused. Force it up front with `fve pod install --repo-update`.
+- **Per-version lockfile snapshots** — `fve use` snapshots both `pubspec.lock` and `ios/Podfile.lock` per Flutter version and restores them on switch, so each version keeps its own working dependency resolution. `fve pod restore` re-applies the pinned version's `Podfile.lock` and reinstalls. `fve pod diff <a> <b>` shows which pods changed between two versions.
+- **Pod-preserving clean** — `fve clean` removes build artifacts but keeps `ios/Pods` (no full `pod install` next build); `fve clean --pods` removes those too.
 - **Zero global side effects** — your system Flutter installation is never touched. All SDKs live in `~/.fve/versions/` and activate per-directory.
 
 ---
