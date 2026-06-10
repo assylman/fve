@@ -1,2 +1,7 @@
 timeout: 60s
 concurrency: 1
+
+tags:
+  # End-to-end tests that spawn the real fve binary against a fake `pod`.
+  # Slower than unit tests; exclude with `dart test -x integration`.
+  integration:

@@ -187,6 +187,210 @@ void main() {
     });
   });
 
+  // ── Stale-spec-index detection ───────────────────────────────────────────
+
+  group('PodService.isStaleSpecRepoError', () {
+    test('matches "could not find compatible versions for pod"', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          '[!] CocoaPods could not find compatible versions for pod '
+          '"AppMetricaAnalytics":',
+        ),
+        isTrue,
+      );
+    });
+
+    test('matches "specs repository is too out-of-date"', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          "Error: CocoaPods's specs repository is too out-of-date to "
+          'satisfy dependencies.',
+        ),
+        isTrue,
+      );
+    });
+
+    test('matches "unable to find a specification for"', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          '[!] Unable to find a specification for `Firebase/Core (= 10.0.0)`',
+        ),
+        isTrue,
+      );
+    });
+
+    test('matches "out-of-date source repos"', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          'You have either:\n * out-of-date source repos.',
+        ),
+        isTrue,
+      );
+    });
+
+    test('is case-insensitive', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          'COULD NOT FIND COMPATIBLE VERSIONS FOR POD "X"',
+        ),
+        isTrue,
+      );
+    });
+
+    test('does not match a normal successful run', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          'Analyzing dependencies\nDownloading dependencies\n'
+          'Pod installation complete!',
+        ),
+        isFalse,
+      );
+    });
+
+    test('does not match an unrelated compilation error', () {
+      expect(
+        PodService.isStaleSpecRepoError(
+          "error: cannot find 'foo' in scope\nCommand CompileSwift failed",
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  // ── Tee-output + auto-retry with --repo-update ───────────────────────────
+
+  group('PodService _runPod retry logic', () {
+    late Directory projectDir;
+
+    setUp(() {
+      // Isolate the pod cache under the temp dir so first-time detection is
+      // deterministic and nothing touches the real ~/.fve.
+      CacheService.fveHomeOverride = p.join(tempDir.path, '.fve');
+      projectDir = Directory(p.join(tempDir.path, 'proj'))..createSync();
+      Directory(p.join(projectDir.path, 'ios')).createSync(recursive: true);
+    });
+
+    tearDown(() {
+      CacheService.fveHomeOverride = null;
+    });
+
+    /// A fake runner that records each invocation's args and returns a canned
+    /// output + exit code.
+    ({PodService pod, List<List<String>> calls}) makePod({
+      required String output,
+      required int exitCode,
+    }) {
+      final calls = <List<String>>[];
+      final pod = PodService(
+        processRunner: (args, cwd, env, onOutput) async {
+          calls.add(List.of(args));
+          onOutput(output);
+          return exitCode;
+        },
+      );
+      return (pod: pod, calls: calls);
+    }
+
+    /// Pre-creates the version cache dir so install takes the warm-cache path
+    /// (no forced --repo-update from first-time detection).
+    void warmCache(PodService pod, String version) =>
+        pod.ensurePodCacheDir(version);
+
+    test('failure + stale output retries once with --repo-update', () async {
+      final f = makePod(
+        output: 'could not find compatible versions for pod "X"',
+        exitCode: 1,
+      );
+      warmCache(f.pod, '3.22.2');
+
+      await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(f.calls.length, 2);
+      expect(f.calls[0], isNot(contains('--repo-update')));
+      expect(f.calls[1], contains('--repo-update'));
+    });
+
+    test('failure + non-stale output does NOT retry', () async {
+      final f = makePod(
+        output: 'Command CompileSwift failed with a nonzero exit code',
+        exitCode: 1,
+      );
+      warmCache(f.pod, '3.22.2');
+
+      final code = await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(f.calls.length, 1);
+      expect(f.calls[0], isNot(contains('--repo-update')));
+      expect(code, 1);
+    });
+
+    test('success runs exactly once', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      warmCache(f.pod, '3.22.2');
+
+      final code = await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(f.calls.length, 1);
+      expect(code, 0);
+    });
+
+    test('retry does not loop — at most two attempts total', () async {
+      // Stale output on BOTH attempts: the second must not trigger a third.
+      final f = makePod(
+        output: 'specs repository is too out-of-date',
+        exitCode: 1,
+      );
+      warmCache(f.pod, '3.22.2');
+
+      await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(f.calls.length, 2);
+    });
+
+    test('--repo-update flag forces it on the first (only) attempt', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      warmCache(f.pod, '3.22.2');
+
+      await f.pod.podInstall(projectDir.path, '3.22.2', repoUpdate: true);
+
+      expect(f.calls.length, 1);
+      expect(f.calls[0], contains('--repo-update'));
+    });
+
+    test('does not duplicate --repo-update when flag set and retry path', () {
+      // Sanity: _withRepoUpdate is idempotent via the public surface — the
+      // forced first attempt already carries it, so no retry can double it.
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      warmCache(f.pod, '3.22.2');
+      return f.pod.podInstall(projectDir.path, '3.22.2', repoUpdate: true).then(
+            (_) => expect(
+              f.calls[0].where((a) => a == '--repo-update').length,
+              1,
+            ),
+          );
+    });
+
+    test('first-time cache forces --repo-update', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      // No warmCache: the version dir does not exist yet.
+
+      await f.pod.podInstall(projectDir.path, '3.99.0');
+
+      expect(f.calls.length, 1);
+      expect(f.calls[0], contains('--repo-update'));
+    });
+
+    test('warm cache without errors does NOT add --repo-update', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      warmCache(f.pod, '3.22.2');
+
+      await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(f.calls.length, 1);
+      expect(f.calls[0], isNot(contains('--repo-update')));
+    });
+  });
+
   // ── Cache management ───────────────────────────────────────────────────────
 
   group('PodService cache management', () {

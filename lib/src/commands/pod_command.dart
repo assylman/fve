@@ -60,6 +60,20 @@ class _PodInstallCommand extends FveCommand {
       "Run pod install using the project's version-isolated pod cache.";
 
   @override
+  List<HelpExample> get usageExamples => const [
+        HelpExample('pod install', 'Install pods (auto-heals a stale index)'),
+        HelpExample('pod install --repo-update', 'Force a fresh spec index'),
+      ];
+
+  _PodInstallCommand() {
+    argParser.addFlag(
+      'repo-update',
+      help: 'Refresh the CocoaPods spec index before installing.',
+      negatable: false,
+    );
+  }
+
+  @override
   Future<void> run() async {
     final (:version, :projectDir) = _resolveContext();
     final pod = PodService();
@@ -70,11 +84,14 @@ class _PodInstallCommand extends FveCommand {
       exit(1);
     }
 
+    final repoUpdate = argResults!['repo-update'] as bool;
+
     Logger.info('Running pod install  [Flutter $version]');
     Logger.dim('  CP_HOME_DIR → ${pod.podCacheDir(version)}');
     Logger.plain('');
 
-    final exitCode = await pod.podInstall(projectDir, version);
+    final exitCode =
+        await pod.podInstall(projectDir, version, repoUpdate: repoUpdate);
 
     Logger.plain('');
     if (exitCode != 0) {

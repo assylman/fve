@@ -1,8 +1,28 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../utils/logger.dart';
 import 'cache_service.dart';
+
+/// Runs a `pod` invocation and reports its combined output.
+///
+/// [args] are the pod arguments (e.g. `['install']`), [cwd] is the working
+/// directory (`<project>/ios`), [env] the environment (with `CP_HOME_DIR`
+/// already set).  [onOutput] is called with each decoded chunk of the
+/// process's stdout/stderr so the caller can accumulate it for analysis.
+/// Returns the process exit code.
+///
+/// The default implementation ([PodService.defaultRunner]) tees the live
+/// output to the real stdout/stderr while feeding [onOutput].  Tests inject a
+/// fake that returns a canned output + exit code without spawning `pod`.
+typedef PodProcessRunner = Future<int> Function(
+  List<String> args,
+  String cwd,
+  Map<String, String> env,
+  void Function(String) onOutput,
+);
 
 /// An entry in the pod cache — one per Flutter version.
 class PodCacheEntry {
@@ -29,6 +49,76 @@ class PodCacheEntry {
 class PodService {
   static const _blockStart = '# fve managed — do not edit this block';
   static const _blockEnd = '# end fve managed';
+
+  /// How the service spawns `pod`.  Defaults to [defaultRunner]; overridden in
+  /// tests with a fake that returns canned output + exit code.
+  final PodProcessRunner _runner;
+
+  PodService({PodProcessRunner? processRunner})
+      : _runner = processRunner ?? defaultRunner;
+
+  /// Substrings (matched case-insensitively) that indicate CocoaPods failed
+  /// because its local spec index is out of date relative to the pinned
+  /// versions in `Podfile.lock`.
+  static const _staleSpecSignatures = <String>[
+    'could not find compatible versions for pod',
+    'specs repository is too out-of-date',
+    'unable to find a specification for',
+    'out-of-date source repos',
+  ];
+
+  /// Returns true when [output] looks like a stale-spec-index failure that a
+  /// `--repo-update` retry can fix.
+  ///
+  /// This is intentionally heuristic and may yield false positives (e.g. a pod
+  /// that genuinely does not exist at any version).  That is acceptable: the
+  /// cost of a false positive is a single extra `--repo-update` attempt, which
+  /// then fails again with the correct, real error.
+  static bool isStaleSpecRepoError(String output) {
+    final lower = output.toLowerCase();
+    return _staleSpecSignatures.any(lower.contains);
+  }
+
+  /// Appends `--repo-update` unless it is already present (idempotent).
+  static List<String> _withRepoUpdate(List<String> args) =>
+      args.contains('--repo-update') ? args : [...args, '--repo-update'];
+
+  /// Real runner: spawns `pod` with piped stdio, tees each decoded chunk to
+  /// the live stdout/stderr (so the user still sees progress) while forwarding
+  /// it to [onOutput] for analysis.  Decodes as UTF-8 tolerantly so binary or
+  /// malformed bytes never crash the stream.
+  static Future<int> defaultRunner(
+    List<String> args,
+    String cwd,
+    Map<String, String> env,
+    void Function(String) onOutput,
+  ) async {
+    final process = await Process.start(
+      'pod',
+      args,
+      workingDirectory: cwd,
+      environment: env,
+      mode: ProcessStartMode.normal,
+    );
+
+    const decoder = Utf8Decoder(allowMalformed: true);
+
+    final stdoutDone = process.stdout.transform(decoder).listen((chunk) {
+      stdout.write(chunk);
+      onOutput(chunk);
+    }).asFuture<void>();
+
+    final stderrDone = process.stderr.transform(decoder).listen((chunk) {
+      stderr.write(chunk);
+      onOutput(chunk);
+    }).asFuture<void>();
+
+    // Await the exit code AND both stream drains so no trailing output is lost
+    // and we never deadlock on an unread pipe.
+    final exitCode = await process.exitCode;
+    await Future.wait([stdoutDone, stderrDone]);
+    return exitCode;
+  }
 
   // ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -119,8 +209,25 @@ class PodService {
   // ── Pod operations ─────────────────────────────────────────────────────────
 
   /// Runs `pod install` in `<projectDir>/ios/` with `CP_HOME_DIR` set.
-  Future<int> podInstall(String projectDir, String version) {
-    return _runPod(projectDir, version, ['install']);
+  ///
+  /// The spec index is refreshed (`--repo-update`) when [repoUpdate] is true
+  /// (explicit `--repo-update` flag) or when this version's pod cache is being
+  /// created for the first time — a fresh cache would otherwise start with an
+  /// empty/missing spec index, the most common cause of resolution failures.
+  /// On a warm cache the fast path (no `--repo-update`) is used, and the
+  /// stale-index retry in [_runPod] heals it only if it actually fails.
+  Future<int> podInstall(
+    String projectDir,
+    String version, {
+    bool repoUpdate = false,
+  }) {
+    final firstTime = !Directory(podCacheDir(version)).existsSync();
+    return _runPod(
+      projectDir,
+      version,
+      ['install'],
+      repoUpdate: repoUpdate || firstTime,
+    );
   }
 
   /// Runs `pod update [podName]` with `CP_HOME_DIR` set.
@@ -133,11 +240,22 @@ class PodService {
     return _runPod(projectDir, version, args);
   }
 
+  /// Runs a `pod` command with the version-isolated `CP_HOME_DIR`, teeing its
+  /// output for analysis.
+  ///
+  /// When [repoUpdate] is true, `--repo-update` is added to the first attempt.
+  /// Otherwise, if an install/update fails with a stale-spec-index signature
+  /// and [allowRetry] is true, the command is re-run exactly once with
+  /// `--repo-update` added.  `--repo-update` only refreshes the spec index and
+  /// then fetches the missing/changed pods — pods already in this version's
+  /// cache are reused, nothing is re-downloaded wholesale.
   Future<int> _runPod(
     String projectDir,
     String version,
-    List<String> args,
-  ) async {
+    List<String> args, {
+    bool repoUpdate = false,
+    bool allowRetry = true,
+  }) async {
     ensurePodCacheDir(version);
 
     final iosDir = Directory(p.join(projectDir, 'ios'));
@@ -148,15 +266,42 @@ class PodService {
     final env = Map<String, String>.from(Platform.environment)
       ..['CP_HOME_DIR'] = podCacheDir(version);
 
-    final process = await Process.start(
-      'pod',
-      args,
-      workingDirectory: iosDir.path,
-      environment: env,
-      mode: ProcessStartMode.inheritStdio,
+    final effectiveArgs = repoUpdate ? _withRepoUpdate(args) : args;
+
+    final buffer = StringBuffer();
+    final exitCode = await _runner(
+      effectiveArgs,
+      iosDir.path,
+      env,
+      buffer.write,
     );
 
-    return process.exitCode;
+    final isInstallOrUpdate =
+        args.isNotEmpty && (args.first == 'install' || args.first == 'update');
+
+    if (exitCode != 0 &&
+        allowRetry &&
+        !repoUpdate &&
+        isInstallOrUpdate &&
+        isStaleSpecRepoError(buffer.toString())) {
+      Logger.plain('');
+      Logger.warning(
+        'CocoaPods spec index is out of date — retrying with --repo-update…',
+      );
+      Logger.dim(
+        '  Refreshing the spec index; only missing/changed pods are fetched, '
+        'cached pods are reused.',
+      );
+      return _runPod(
+        projectDir,
+        version,
+        args,
+        repoUpdate: true,
+        allowRetry: false,
+      );
+    }
+
+    return exitCode;
   }
 
   // ── Cache management ───────────────────────────────────────────────────────
