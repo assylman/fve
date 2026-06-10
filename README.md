@@ -78,7 +78,10 @@ fve flutter run       # run Flutter via the pinned version
 
 ## Platform Support
 
-macOS (Apple Silicon / Intel) · Linux (x64 / arm64)
+Pre-built binaries: macOS (Apple Silicon) · Linux (x64).
+
+macOS Intel and Linux arm64 are not distributed yet — build from source with
+`dart compile exe bin/fve.dart` on those platforms.
 
 ## License
 
