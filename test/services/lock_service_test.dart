@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:fve/src/services/cache_service.dart';
 import 'package:fve/src/services/lock_service.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
@@ -59,5 +60,38 @@ void main() {
       ..writeAsStringSync('not-a-pid\n');
     expect(LockService.acquire(), isTrue);
     LockService.release();
+  });
+
+  // ── Keyed (scoped) locks ───────────────────────────────────────────────────
+
+  group('keyed lock (path:)', () {
+    String lockA() => p.join(tmp.path, 'pods', '3.22.2.lock');
+    String lockB() => p.join(tmp.path, 'pods', '3.19.0.lock');
+
+    test('acquires at a custom path and writes this PID', () {
+      expect(LockService.acquire(path: lockA()), isTrue);
+      expect(File(lockA()).readAsStringSync().trim(), '$pid');
+      LockService.release(path: lockA());
+      expect(File(lockA()).existsSync(), isFalse);
+    });
+
+    test('a second acquire of the SAME key fails while held', () {
+      expect(LockService.acquire(path: lockA()), isTrue);
+      expect(LockService.acquire(path: lockA()), isFalse);
+      LockService.release(path: lockA());
+    });
+
+    test('different keys are independent (concurrent versions allowed)', () {
+      expect(LockService.acquire(path: lockA()), isTrue);
+      expect(LockService.acquire(path: lockB()), isTrue);
+      LockService.release(path: lockA());
+      LockService.release(path: lockB());
+    });
+
+    test('the keyed lock does not touch the global lock', () {
+      expect(LockService.acquire(path: lockA()), isTrue);
+      expect(File(LockService.lockFile).existsSync(), isFalse);
+      LockService.release(path: lockA());
+    });
   });
 }

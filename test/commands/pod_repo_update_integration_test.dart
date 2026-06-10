@@ -118,6 +118,12 @@ void main() {
         extraEnv: {'PATH': pathWithFakePod()},
       );
 
+  Future<FveResult> runUse(Directory proj, String version) => env.run(
+        ['use', version, '--skip-pub-get', '--no-vscode'],
+        workingDir: proj.path,
+        extraEnv: {'PATH': pathWithFakePod()},
+      );
+
   // ── Auto-heal retry ──────────────────────────────────────────────────────
 
   group('pod install — stale spec index auto-heal', () {
@@ -258,6 +264,33 @@ void main() {
       expect(r.exitCode, isNot(0));
       expect(r.output.toLowerCase(), contains('podfile'));
       expect(recordedCalls(), isEmpty); // pod never invoked
+    }, skip: skipReason);
+  });
+
+  // ── Auto pod install on `fve use` (config-gated) ────────────────────────────
+
+  group('fve use — auto pod install', () {
+    test('runs pod install when auto_pod_install is enabled', () async {
+      env.writeConfig({'auto_pod_install': true});
+      env.installVersion('3.22.2');
+      writeFakePod(withFlag: 'ok', withoutFlag: 'ok');
+      final proj = makeIosProject('3.22.2');
+
+      final r = await runUse(proj, '3.22.2');
+
+      expect(r.exitCode, 0, reason: r.toString());
+      expect(recordedCalls().length, 1); // pod install ran once
+    }, skip: skipReason);
+
+    test('does NOT run pod install when disabled (default)', () async {
+      env.installVersion('3.22.2');
+      writeFakePod(withFlag: 'ok', withoutFlag: 'ok');
+      final proj = makeIosProject('3.22.2');
+
+      final r = await runUse(proj, '3.22.2');
+
+      expect(r.exitCode, 0, reason: r.toString());
+      expect(recordedCalls(), isEmpty);
     }, skip: skipReason);
   });
 }

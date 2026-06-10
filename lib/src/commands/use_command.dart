@@ -154,6 +154,22 @@ class UseCommand extends FveCommand {
       if (restoredPods) {
         Logger.dim('  Restored ios/Podfile.lock snapshot for Flutter $version');
       }
+
+      // Auto pod install (opt-in via `fve config --auto-pod-install`).
+      if (!skipInstall && config.getAutoPodInstall()) {
+        Logger.plain('');
+        Logger.info('Running pod install (auto)  [Flutter $version]');
+        final podExit = await pod.podInstall(cwd, version);
+        if (podExit == 0) {
+          Logger.success('pod install complete.');
+        } else {
+          // Non-fatal: the version is already pinned; surface and move on.
+          Logger.warning(
+            'Auto pod install failed (exit $podExit). '
+            'Run `fve pod install` manually.',
+          );
+        }
+      }
     }
 
     // Update global symlink if requested.

@@ -13,17 +13,19 @@ import 'cache_service.dart';
 class LockService {
   static String get lockFile => p.join(CacheService.fveHome, 'lock');
 
-  /// Acquires the lock. Returns true on success, false if another fve process
-  /// is already running. Clears stale locks from dead processes automatically.
-  static bool acquire() {
-    final file = File(lockFile);
+  /// Acquires a lock. With no [path] this is the global fve lock; pass [path]
+  /// for a scoped lock (e.g. one per version's pod cache so installs for
+  /// different versions can run concurrently). Returns true on success, false
+  /// if another live process holds it. Stale locks from dead PIDs are cleared.
+  static bool acquire({String? path}) {
+    final file = File(path ?? lockFile);
     file.parent.createSync(recursive: true);
 
     if (file.existsSync()) {
       final contents = file.readAsStringSync().trim();
       final stalePid = int.tryParse(contents);
       if (stalePid != null && _isProcessRunning(stalePid)) {
-        return false; // another live fve process holds the lock
+        return false; // another live process holds the lock
       }
       // Stale lock — clear it.
       file.deleteSync();
@@ -33,9 +35,9 @@ class LockService {
     return true;
   }
 
-  /// Releases the lock if this process holds it.
-  static void release() {
-    final file = File(lockFile);
+  /// Releases the lock at [path] (or the global lock) if this process holds it.
+  static void release({String? path}) {
+    final file = File(path ?? lockFile);
     if (!file.existsSync()) return;
     final contents = file.readAsStringSync().trim();
     if (contents == '$pid') {

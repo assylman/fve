@@ -63,6 +63,18 @@ class ConfigService {
     _write(data);
   }
 
+  // ── Auto pod install ──────────────────────────────────────────────────────
+
+  /// Whether `fve use` automatically runs `pod install` when the project has an
+  /// `ios/Podfile`. Defaults to false (opt-in) — pod installs can be slow.
+  bool getAutoPodInstall() => _read()['auto_pod_install'] as bool? ?? false;
+
+  void setAutoPodInstall(bool value) {
+    final data = _read();
+    data['auto_pod_install'] = value;
+    _write(data);
+  }
+
   // ── Raw access (for fve api context) ─────────────────────────────────────
 
   Map<String, dynamic> readAll() => _read();

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../utils/logger.dart';
 import 'cache_service.dart';
+import 'lock_service.dart';
 
 /// Runs a `pod` invocation and reports its combined output.
 ///
@@ -240,15 +241,15 @@ class PodService {
     return _runPod(projectDir, version, args);
   }
 
-  /// Runs a `pod` command with the version-isolated `CP_HOME_DIR`, teeing its
-  /// output for analysis.
-  ///
-  /// When [repoUpdate] is true, `--repo-update` is added to the first attempt.
-  /// Otherwise, if an install/update fails with a stale-spec-index signature
-  /// and [allowRetry] is true, the command is re-run exactly once with
-  /// `--repo-update` added.  `--repo-update` only refreshes the spec index and
-  /// then fetches the missing/changed pods — pods already in this version's
-  /// cache are reused, nothing is re-downloaded wholesale.
+  /// Advisory lock file guarding this version's pod cache. Kept as a sibling of
+  /// the cache dir (not inside it) so it never pollutes `CP_HOME_DIR`.
+  String _podLockPath(String version) => p.join(podsDir, '$version.lock');
+
+  /// Runs a `pod` command under a per-version cache lock, then delegates to
+  /// [_runPodLocked]. The lock is keyed on the version's pod cache, so installs
+  /// for *different* versions still run concurrently; only same-version
+  /// operations are serialized (CocoaPods does not lock its cache itself, so
+  /// two simultaneous installs of the same version could corrupt it).
   Future<int> _runPod(
     String projectDir,
     String version,
@@ -263,6 +264,45 @@ class PodService {
       throw StateError('ios/ directory not found in $projectDir');
     }
 
+    final lockPath = _podLockPath(version);
+    if (!LockService.acquire(path: lockPath)) {
+      Logger.error(
+        'Another pod operation is already running for Flutter $version.',
+      );
+      Logger.dim('  Wait for it to finish, or retry in a moment.');
+      return 75; // EX_TEMPFAIL
+    }
+
+    try {
+      return await _runPodLocked(
+        iosDir,
+        version,
+        args,
+        repoUpdate: repoUpdate,
+        allowRetry: allowRetry,
+      );
+    } finally {
+      LockService.release(path: lockPath);
+    }
+  }
+
+  /// The locked body: runs `pod`, tees output, and applies the one-shot
+  /// stale-index `--repo-update` retry. Recurses on itself (NOT [_runPod]) so
+  /// the retry runs under the already-held lock instead of deadlocking on it.
+  ///
+  /// When [repoUpdate] is true, `--repo-update` is added to the first attempt.
+  /// Otherwise, if an install/update fails with a stale-spec-index signature
+  /// and [allowRetry] is true, the command is re-run exactly once with
+  /// `--repo-update` added.  `--repo-update` only refreshes the spec index and
+  /// then fetches the missing/changed pods — pods already in this version's
+  /// cache are reused, nothing is re-downloaded wholesale.
+  Future<int> _runPodLocked(
+    Directory iosDir,
+    String version,
+    List<String> args, {
+    bool repoUpdate = false,
+    bool allowRetry = true,
+  }) async {
     final env = Map<String, String>.from(Platform.environment)
       ..['CP_HOME_DIR'] = podCacheDir(version);
 
@@ -292,8 +332,8 @@ class PodService {
         '  Refreshing the spec index; only missing/changed pods are fetched, '
         'cached pods are reused.',
       );
-      return _runPod(
-        projectDir,
+      return _runPodLocked(
+        iosDir,
         version,
         args,
         repoUpdate: true,

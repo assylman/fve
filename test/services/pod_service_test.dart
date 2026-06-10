@@ -389,6 +389,48 @@ void main() {
       expect(f.calls.length, 1);
       expect(f.calls[0], isNot(contains('--repo-update')));
     });
+
+    // ── Per-version cache lock ──────────────────────────────────────────────
+
+    String lockPathFor(String version) =>
+        p.join(PodService.podsDir, '$version.lock');
+
+    test('a held lock blocks the operation and pod is never run', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      f.pod.ensurePodCacheDir('3.22.2');
+      // Simulate another live process holding this version's lock (our PID).
+      File(lockPathFor('3.22.2'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('$pid\n');
+
+      final code = await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(code, isNot(0)); // EX_TEMPFAIL
+      expect(f.calls, isEmpty); // pod was never invoked
+    });
+
+    test('a successful run releases the lock afterwards', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      warmCache(f.pod, '3.22.2');
+
+      await f.pod.podInstall(projectDir.path, '3.22.2');
+
+      expect(File(lockPathFor('3.22.2')).existsSync(), isFalse);
+    });
+
+    test('different versions lock independently', () async {
+      final f = makePod(output: 'Pod installation complete!', exitCode: 0);
+      f.pod.ensurePodCacheDir('3.22.2');
+      // 3.22.2 is held, but installing 3.19.0 must still proceed.
+      File(lockPathFor('3.22.2'))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('$pid\n');
+
+      final code = await f.pod.podInstall(projectDir.path, '3.19.0');
+
+      expect(code, 0);
+      expect(f.calls.length, 1);
+    });
   });
 
   // ── Cache management ───────────────────────────────────────────────────────

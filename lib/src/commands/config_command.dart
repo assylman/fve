@@ -20,6 +20,7 @@ class ConfigCommand extends FveCommand {
         HelpExample('config --vscode-integration', 'Re-enable auto VS Code settings update'),
         HelpExample('config --no-auto-pub-get', 'Disable auto flutter pub get on fve use'),
         HelpExample('config --auto-pub-get', 'Re-enable auto flutter pub get on fve use'),
+        HelpExample('config --auto-pod-install', 'Run pod install automatically on fve use'),
       ];
 
   ConfigCommand() {
@@ -32,6 +33,11 @@ class ConfigCommand extends FveCommand {
       ..addFlag(
         'auto-pub-get',
         help: 'Auto-run flutter pub get when running fve use.',
+        defaultsTo: null,
+      )
+      ..addFlag(
+        'auto-pod-install',
+        help: 'Auto-run pod install (iOS projects) when running fve use.',
         defaultsTo: null,
       );
   }
@@ -55,6 +61,13 @@ class ConfigCommand extends FveCommand {
       didUpdate = true;
     }
 
+    final autoPodInstall = argResults!['auto-pod-install'] as bool?;
+    if (autoPodInstall != null) {
+      config.setAutoPodInstall(autoPodInstall);
+      Logger.success('auto-pod-install = $autoPodInstall');
+      didUpdate = true;
+    }
+
     if (!didUpdate) {
       _printAll(config);
     }
@@ -68,6 +81,7 @@ class ConfigCommand extends FveCommand {
     _row('default-version',    config.getDefaultVersion() ?? '(none)');
     _row('vscode-integration', '${config.getVsCodeIntegration()}');
     _row('auto-pub-get',       '${config.getAutoPubGet()}');
+    _row('auto-pod-install',   '${config.getAutoPodInstall()}');
 
     Logger.plain('');
     Logger.dim('  Use fve config --[no-]<setting> to change a value.');
