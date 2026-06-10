@@ -26,6 +26,14 @@ void main() {
   void writeLock(String content) =>
       File(p.join(project.path, 'pubspec.lock')).writeAsStringSync(content);
 
+  void writePodLock(String content) {
+    final ios = Directory(p.join(project.path, 'ios'))..createSync();
+    File(p.join(ios.path, 'Podfile.lock')).writeAsStringSync(content);
+  }
+
+  String readPodLock() =>
+      File(p.join(project.path, 'ios', 'Podfile.lock')).readAsStringSync();
+
   group('save', () {
     test('snapshots an existing pubspec.lock', () {
       writeLock('# lock 3.22.2\n');
@@ -94,6 +102,57 @@ void main() {
 
       expect(svc.hasSnapshot(project.path, '3.22.2'), isTrue);
       expect(svc.hasSnapshot(project.path, '3.24.0'), isFalse);
+    });
+  });
+
+  group('Podfile.lock (LockKind.podfile)', () {
+    test('saves and restores ios/Podfile.lock independently of pubspec.lock',
+        () {
+      writePodLock('PODS: AppMetrica 5.16.1\n');
+      svc.save(project.path, '3.22.2', kind: LockKind.podfile);
+      expect(svc.hasSnapshot(project.path, '3.22.2', kind: LockKind.podfile),
+          isTrue);
+      // pubspec snapshot does NOT exist (we only saved the podfile kind).
+      expect(svc.hasSnapshot(project.path, '3.22.2'), isFalse);
+
+      writePodLock('PODS: changed\n');
+      expect(svc.restore(project.path, '3.22.2', kind: LockKind.podfile),
+          isTrue);
+      expect(readPodLock(), 'PODS: AppMetrica 5.16.1\n');
+    });
+
+    test('save is a no-op when ios/Podfile.lock is absent', () {
+      svc.save(project.path, '3.22.2', kind: LockKind.podfile);
+      expect(svc.hasSnapshot(project.path, '3.22.2', kind: LockKind.podfile),
+          isFalse);
+    });
+
+    test('restore returns false when no podfile snapshot exists', () {
+      expect(svc.restore(project.path, '9.9.9', kind: LockKind.podfile),
+          isFalse);
+    });
+
+    test('both lockfiles coexist in the same version snapshot', () {
+      writeLock('# pub 3.22.2\n');
+      writePodLock('# pods 3.22.2\n');
+      svc.save(project.path, '3.22.2');
+      svc.save(project.path, '3.22.2', kind: LockKind.podfile);
+
+      expect(svc.hasSnapshot(project.path, '3.22.2'), isTrue);
+      expect(svc.hasSnapshot(project.path, '3.22.2', kind: LockKind.podfile),
+          isTrue);
+
+      final entry =
+          svc.listSnapshots(project.path).firstWhere((s) => s.version == '3.22.2');
+      expect(entry.locks, containsAll(['pubspec.lock', 'Podfile.lock']));
+    });
+
+    test('listSnapshots includes a version with only a Podfile.lock', () {
+      writePodLock('# pods only\n');
+      svc.save(project.path, '3.30.0', kind: LockKind.podfile);
+      final versions =
+          svc.listSnapshots(project.path).map((s) => s.version).toList();
+      expect(versions, contains('3.30.0'));
     });
   });
 

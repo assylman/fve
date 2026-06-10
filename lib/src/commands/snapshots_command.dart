@@ -53,10 +53,11 @@ class SnapshotsCommand extends FveCommand {
       return;
     }
 
-    Logger.header('pubspec.lock snapshots (current project)');
+    Logger.header('dependency lock snapshots (current project)');
     for (final s in snapshots) {
       final active = projectConfig?.flutterVersion == s.version ? '  ← active' : '';
       Logger.plain('  ${s.version}$active');
+      Logger.dim('    ${s.locks.join(', ')}');
       Logger.dim('    ${s.path}');
     }
     Logger.plain('');
@@ -71,7 +72,7 @@ class SnapshotsCommand extends FveCommand {
       return;
     }
 
-    Logger.header('pubspec.lock snapshots (all projects)');
+    Logger.header('dependency lock snapshots (all projects)');
     String? lastProject;
     for (final s in all) {
       final proj = s['project_id'] as String;
@@ -79,7 +80,8 @@ class SnapshotsCommand extends FveCommand {
         Logger.plain('  Project: $proj');
         lastProject = proj;
       }
-      Logger.plain('    ${s['version']}');
+      final locks = (s['locks'] as List).join(', ');
+      Logger.plain('    ${s['version']}  ($locks)');
     }
     Logger.plain('');
     Logger.dim('${all.length} snapshot(s) across ${all.map((s) => s['project_id']).toSet().length} project(s).');

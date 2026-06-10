@@ -129,6 +129,35 @@ void main() {
     });
   });
 
+  // ── Podfile.lock snapshots round-trip ───────────────────────────────────────
+
+  group('fve use — ios/Podfile.lock snapshots', () {
+    test('round-trips Podfile.lock across version switches', () async {
+      env.installVersion('3.22.2');
+      env.installVersion('3.19.0');
+      _createPodfile(projectDir);
+      final podLock = File(p.join(projectDir.path, 'ios', 'Podfile.lock'));
+
+      // Pin 3.22.2, then record its Podfile.lock.
+      await env.run(['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+          workingDir: projectDir.path);
+      podLock.writeAsStringSync('LOCK-A (3.22.2)\n');
+
+      // Switch to 3.19.0 → snapshots 3.22.2's lock; set a different one.
+      await env.run(['use', '3.19.0', '--skip-pub-get', '--no-vscode'],
+          workingDir: projectDir.path);
+      podLock.writeAsStringSync('LOCK-B (3.19.0)\n');
+
+      // Switch back to 3.22.2 → should restore LOCK-A.
+      final r = await env.run(['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+          workingDir: projectDir.path);
+
+      expect(r.exitCode, 0, reason: r.toString());
+      expect(podLock.readAsStringSync(), 'LOCK-A (3.22.2)\n');
+      expect(r.output, contains('Restored ios/Podfile.lock'));
+    });
+  });
+
   // ── --skip-install ────────────────────────────────────────────────────────
 
   group('fve use --skip-install', () {

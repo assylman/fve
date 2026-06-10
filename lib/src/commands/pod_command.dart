@@ -3,6 +3,7 @@ import 'dart:io';
 import '../help.dart';
 import '../models/project_config.dart';
 import '../services/pod_service.dart';
+import '../services/snapshot_service.dart';
 import '../utils/logger.dart';
 import 'base_command.dart';
 
@@ -21,6 +22,7 @@ class PodCommand extends FveCommand {
         HelpExample('pod install', 'Run pod install with isolated cache'),
         HelpExample('pod update', 'Run pod update with isolated cache'),
         HelpExample('pod update FirebaseCore', 'Update a single pod'),
+        HelpExample('pod restore', 'Restore Podfile.lock + reinstall after switching'),
         HelpExample('pod cache list', 'Show disk usage per Flutter version'),
         HelpExample('pod cache clear 3.22.2', 'Delete cache for one version'),
         HelpExample('pod cache clear --all', 'Delete all pod caches'),
@@ -29,6 +31,7 @@ class PodCommand extends FveCommand {
   PodCommand() {
     addSubcommand(_PodInstallCommand());
     addSubcommand(_PodUpdateCommand());
+    addSubcommand(_PodRestoreCommand());
     addSubcommand(_PodCacheCommand());
   }
 }
@@ -145,6 +148,59 @@ class _PodUpdateCommand extends FveCommand {
       exit(exitCode);
     }
     Logger.success('$label complete.');
+  }
+}
+
+// ── pod restore ──────────────────────────────────────────────────────────────────
+
+class _PodRestoreCommand extends FveCommand {
+  @override
+  String get name => 'restore';
+
+  @override
+  String get description =>
+      "Restore this version's Podfile.lock snapshot, then re-run pod install.";
+
+  @override
+  List<HelpExample> get usageExamples => const [
+        HelpExample(
+          'pod restore',
+          'Restore Podfile.lock for the pinned version, then pod install',
+        ),
+      ];
+
+  @override
+  Future<void> run() async {
+    final (:version, :projectDir) = _resolveContext();
+    final pod = PodService();
+
+    if (!pod.hasPodfile(projectDir)) {
+      Logger.error('No ios/Podfile found in $projectDir');
+      exit(1);
+    }
+
+    final restored =
+        SnapshotService().restore(projectDir, version, kind: LockKind.podfile);
+    if (restored) {
+      Logger.success('Restored ios/Podfile.lock snapshot for Flutter $version');
+    } else {
+      Logger.dim(
+        'No Podfile.lock snapshot for Flutter $version — running a fresh install.',
+      );
+    }
+
+    Logger.info('Running pod install  [Flutter $version]');
+    Logger.dim('  CP_HOME_DIR → ${pod.podCacheDir(version)}');
+    Logger.plain('');
+
+    final exitCode = await pod.podInstall(projectDir, version);
+
+    Logger.plain('');
+    if (exitCode != 0) {
+      Logger.error('pod restore failed (exit $exitCode).');
+      exit(exitCode);
+    }
+    Logger.success('pod restore complete.');
   }
 }
 

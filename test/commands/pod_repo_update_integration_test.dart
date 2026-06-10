@@ -112,6 +112,12 @@ void main() {
         extraEnv: {'PATH': pathWithFakePod()},
       );
 
+  Future<FveResult> runRestore(Directory proj) => env.run(
+        ['pod', 'restore'],
+        workingDir: proj.path,
+        extraEnv: {'PATH': pathWithFakePod()},
+      );
+
   // ── Auto-heal retry ──────────────────────────────────────────────────────
 
   group('pod install — stale spec index auto-heal', () {
@@ -224,6 +230,34 @@ void main() {
 
       expect(r.exitCode, isNot(0));
       expect(recordedCalls().length, 1);
+    }, skip: skipReason);
+  });
+
+  // ── pod restore ───────────────────────────────────────────────────────────
+
+  group('pod restore', () {
+    test('runs pod install and notes the missing snapshot when none exists',
+        () async {
+      writeFakePod(withFlag: 'ok', withoutFlag: 'ok');
+      final proj = makeIosProject('3.22.2');
+      warmPodCache('3.22.2');
+
+      final r = await runRestore(proj);
+
+      expect(r.exitCode, 0, reason: r.toString());
+      expect(recordedCalls().length, 1); // a single pod install
+      expect(r.output.toLowerCase(), contains('no podfile.lock snapshot'));
+    }, skip: skipReason);
+
+    test('errors when the project has no ios/Podfile', () async {
+      writeFakePod(withFlag: 'ok', withoutFlag: 'ok');
+      final proj = env.createProjectDir(pinnedVersion: '3.22.2'); // no Podfile
+
+      final r = await runRestore(proj);
+
+      expect(r.exitCode, isNot(0));
+      expect(r.output.toLowerCase(), contains('podfile'));
+      expect(recordedCalls(), isEmpty); // pod never invoked
     }, skip: skipReason);
   });
 }

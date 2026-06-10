@@ -124,10 +124,12 @@ class UseCommand extends FveCommand {
       }
     }
 
-    // Snapshot the current pubspec.lock for the PREVIOUS version before switching.
+    // Snapshot the current lockfiles for the PREVIOUS version before switching.
     final previousConfig = ProjectConfig.findForDirectory(cwd);
     if (previousConfig != null && previousConfig.flutterVersion != version) {
-      SnapshotService().save(cwd, previousConfig.flutterVersion);
+      final snap = SnapshotService();
+      snap.save(cwd, previousConfig.flutterVersion);
+      snap.save(cwd, previousConfig.flutterVersion, kind: LockKind.podfile);
     }
 
     // Write .fverc.
@@ -140,12 +142,18 @@ class UseCommand extends FveCommand {
       Logger.dim('  Restored pubspec.lock snapshot for Flutter $version');
     }
 
-    // Inject CP_HOME_DIR block into ios/Podfile if the project has one.
+    // Inject CP_HOME_DIR block into ios/Podfile if the project has one, and
+    // restore this version's Podfile.lock snapshot so pod resolution matches.
     final pod = PodService();
     if (pod.hasPodfile(cwd)) {
       pod.injectPodfile(cwd, version);
       Logger.success('Updated ios/Podfile with pod cache isolation');
       Logger.dim('  CP_HOME_DIR → ${pod.podCacheDir(version)}');
+      final restoredPods =
+          SnapshotService().restore(cwd, version, kind: LockKind.podfile);
+      if (restoredPods) {
+        Logger.dim('  Restored ios/Podfile.lock snapshot for Flutter $version');
+      }
     }
 
     // Update global symlink if requested.
