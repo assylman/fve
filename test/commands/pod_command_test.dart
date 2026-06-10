@@ -183,4 +183,48 @@ void main() {
       expect(cacheDir.existsSync(), isFalse);
     });
   });
+
+  // ── pod diff ─────────────────────────────────────────────────────────────
+
+  group('fve pod diff', () {
+    test('errors when a snapshot is missing', () async {
+      final dir = env.createProjectDir(pinnedVersion: '3.22.2');
+      final r = await env.run(
+        ['pod', 'diff', '3.22.2', '3.24.0'],
+        workingDir: dir.path,
+      );
+      expect(r.exitCode, isNot(0));
+      expect(r.output.toLowerCase(), contains('snapshot'));
+    });
+
+    test('shows pod version changes between two snapshots', () async {
+      env.installVersion('3.22.2');
+      env.installVersion('3.24.0');
+      final dir = env.createProjectDir();
+      // Minimal iOS project so `fve use` snapshots Podfile.lock.
+      final ios = Directory(p.join(dir.path, 'ios'))..createSync();
+      File(p.join(ios.path, 'Podfile')).writeAsStringSync("platform :ios, '12.0'\n");
+      final podLock = File(p.join(ios.path, 'Podfile.lock'));
+
+      Future<void> use(String v) => env
+          .run(['use', v, '--skip-pub-get', '--no-vscode'], workingDir: dir.path)
+          .then((_) {});
+
+      await use('3.22.2');
+      podLock.writeAsStringSync('PODS:\n  - Foo (1.0.0)\n\nCOCOAPODS: 1.14.0\n');
+      await use('3.24.0'); // snapshots 3.22.2's lock (Foo 1.0.0)
+      podLock.writeAsStringSync('PODS:\n  - Foo (2.0.0)\n\nCOCOAPODS: 1.15.0\n');
+      await use('3.22.2'); // snapshots 3.24.0's lock (Foo 2.0.0)
+
+      final r = await env.run(
+        ['pod', 'diff', '3.22.2', '3.24.0'],
+        workingDir: dir.path,
+      );
+
+      expect(r.exitCode, 0, reason: r.toString());
+      expect(r.output, contains('Foo'));
+      expect(r.output, contains('1.0.0'));
+      expect(r.output, contains('2.0.0'));
+    });
+  });
 }

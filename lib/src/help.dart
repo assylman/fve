@@ -53,6 +53,7 @@ class HelpFormatter {
     _out('');
     _section('IOS / COCOAPODS');
     _row('pod', 'Run pod install/update with version-isolated cache');
+    _row('clean', 'Clean build artifacts while preserving ios/Pods');
     _out('');
     _section('TOOLING & DIAGNOSTICS');
     _row('doctor',  'Diagnose your fve environment');

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 
+import '../models/podfile_lock.dart';
 import '../models/project_config.dart';
 import '../services/cache_service.dart';
 import '../services/pod_service.dart';
@@ -130,6 +131,7 @@ class DoctorCommand extends FveCommand {
               ? pod.podCacheDir(version)
               : 'Run: fve pod install',
         );
+        _checkCocoaPodsDrift(cwd);
       } else {
         Logger.dim('  ios/Podfile found. Pin a version first: fve use <version>');
       }
@@ -279,6 +281,40 @@ class DoctorCommand extends FveCommand {
         }
       }
     } catch (_) {}
+  }
+
+  /// Warns when `ios/Podfile.lock` was generated with a different CocoaPods
+  /// version than the one currently installed (ROADMAP Risk #6 — cache/lock
+  /// built with one CocoaPods can behave differently with another).
+  void _checkCocoaPodsDrift(String cwd) {
+    final lock = File(p.join(cwd, 'ios', 'Podfile.lock'));
+    if (!lock.existsSync()) return;
+    final lockCp = PodfileLock.parse(lock.readAsStringSync()).cocoaPodsVersion;
+    if (lockCp == null) return;
+
+    final installed = _installedCocoaPodsVersion();
+    if (installed == null) return; // pod not found — reported elsewhere
+
+    if (lockCp == installed) {
+      _check('CocoaPods version', true, 'Podfile.lock and pod both $lockCp');
+    } else {
+      _check(
+        'CocoaPods version',
+        false,
+        'Podfile.lock built with CocoaPods $lockCp, installed is $installed\n'
+        '    Re-run: fve pod install  (regenerates the lock)',
+      );
+    }
+  }
+
+  String? _installedCocoaPodsVersion() {
+    try {
+      final r = Process.runSync('pod', ['--version']);
+      if (r.exitCode != 0) return null;
+      return (r.stdout as String).trim().split('\n').first.trim();
+    } catch (_) {
+      return null;
+    }
   }
 
   void _checkRubyVersion() {

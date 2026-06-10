@@ -106,6 +106,17 @@ class SnapshotService {
   }) =>
       File(_snapshotFilePath(projectDir, version, kind)).existsSync();
 
+  /// Returns the contents of the [kind] snapshot for [version] without writing
+  /// it back into the project, or null if no such snapshot exists.
+  String? readSnapshot(
+    String projectDir,
+    String version, {
+    LockKind kind = LockKind.pubspec,
+  }) {
+    final f = File(_snapshotFilePath(projectDir, version, kind));
+    return f.existsSync() ? f.readAsStringSync() : null;
+  }
+
   /// The lockfile filenames snapshotted under [versionDir], in [LockKind] order.
   List<String> _locksIn(String versionDir) => LockKind.values
       .where((k) => File(p.join(versionDir, k.fileName)).existsSync())

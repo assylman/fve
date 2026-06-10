@@ -154,6 +154,25 @@ void main() {
           svc.listSnapshots(project.path).map((s) => s.version).toList();
       expect(versions, contains('3.30.0'));
     });
+
+    test('readSnapshot returns the stored content without restoring', () {
+      writePodLock('PODS:\n  - Foo (1.0.0)\n');
+      svc.save(project.path, '3.22.2', kind: LockKind.podfile);
+      // Mutate the working copy; readSnapshot must NOT touch it.
+      writePodLock('changed\n');
+
+      final content =
+          svc.readSnapshot(project.path, '3.22.2', kind: LockKind.podfile);
+      expect(content, 'PODS:\n  - Foo (1.0.0)\n');
+      expect(readPodLock(), 'changed\n'); // working copy untouched
+    });
+
+    test('readSnapshot returns null when no snapshot exists', () {
+      expect(
+        svc.readSnapshot(project.path, '9.9.9', kind: LockKind.podfile),
+        isNull,
+      );
+    });
   });
 
   group('project isolation', () {

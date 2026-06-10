@@ -5,6 +5,7 @@ import 'package:args/command_runner.dart';
 import 'utils/logger.dart';
 
 import 'commands/api_command.dart';
+import 'commands/clean_command.dart';
 import 'commands/pod_command.dart';
 import 'commands/config_command.dart';
 import 'commands/current_command.dart';
@@ -61,6 +62,7 @@ class FveRunner {
       ..addCommand(ExecCommand())
       ..addCommand(SpawnCommand())
       ..addCommand(PodCommand())
+      ..addCommand(CleanCommand())
       ..addCommand(ConfigCommand())
       ..addCommand(DestroyCommand())
       ..addCommand(ApiCommand())

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../help.dart';
+import '../models/podfile_lock.dart';
 import '../models/project_config.dart';
 import '../services/pod_service.dart';
 import '../services/snapshot_service.dart';
@@ -23,6 +24,7 @@ class PodCommand extends FveCommand {
         HelpExample('pod update', 'Run pod update with isolated cache'),
         HelpExample('pod update FirebaseCore', 'Update a single pod'),
         HelpExample('pod restore', 'Restore Podfile.lock + reinstall after switching'),
+        HelpExample('pod diff 3.22.2 3.24.0', 'Compare pod versions between two snapshots'),
         HelpExample('pod cache list', 'Show disk usage per Flutter version'),
         HelpExample('pod cache clear 3.22.2', 'Delete cache for one version'),
         HelpExample('pod cache clear --all', 'Delete all pod caches'),
@@ -32,6 +34,7 @@ class PodCommand extends FveCommand {
     addSubcommand(_PodInstallCommand());
     addSubcommand(_PodUpdateCommand());
     addSubcommand(_PodRestoreCommand());
+    addSubcommand(_PodDiffCommand());
     addSubcommand(_PodCacheCommand());
   }
 }
@@ -201,6 +204,82 @@ class _PodRestoreCommand extends FveCommand {
       exit(exitCode);
     }
     Logger.success('pod restore complete.');
+  }
+}
+
+// ── pod diff ─────────────────────────────────────────────────────────────────────
+
+class _PodDiffCommand extends FveCommand {
+  @override
+  String get name => 'diff';
+
+  @override
+  String get description =>
+      'Compare pod versions between two Flutter versions\' Podfile.lock snapshots.';
+
+  @override
+  String get argSyntax => '<version-a> <version-b>';
+
+  @override
+  List<HelpArg> get helpArguments => const [
+        HelpArg('<version-a>', 'Baseline Flutter version (snapshot)'),
+        HelpArg('<version-b>', 'Compared Flutter version (snapshot)'),
+      ];
+
+  @override
+  List<HelpExample> get usageExamples => const [
+        HelpExample('pod diff 3.22.2 3.24.0', 'Show pod changes between two versions'),
+      ];
+
+  @override
+  Future<void> run() async {
+    final projectDir = Directory.current.path;
+    final rest = argResults!.rest;
+    if (rest.length < 2) {
+      Logger.error('Provide two Flutter versions to compare.');
+      Logger.dim('  fve pod diff <version-a> <version-b>');
+      exit(64);
+    }
+    final versionA = rest[0];
+    final versionB = rest[1];
+
+    final snap = SnapshotService();
+    final rawA = snap.readSnapshot(projectDir, versionA, kind: LockKind.podfile);
+    final rawB = snap.readSnapshot(projectDir, versionB, kind: LockKind.podfile);
+
+    if (rawA == null || rawB == null) {
+      final missing = [
+        if (rawA == null) versionA,
+        if (rawB == null) versionB,
+      ].join(', ');
+      Logger.error('No Podfile.lock snapshot for: $missing');
+      Logger.dim('Snapshots are saved when you run fve use <version> in an iOS project.');
+      exit(1);
+    }
+
+    final changes = diffPodfileLocks(
+      PodfileLock.parse(rawA),
+      PodfileLock.parse(rawB),
+    );
+
+    Logger.header('Podfile.lock diff  $versionA → $versionB');
+    if (changes.isEmpty) {
+      Logger.dim('  No pod version differences.');
+      return;
+    }
+
+    for (final c in changes) {
+      switch (c.kind) {
+        case PodChangeKind.added:
+          Logger.success('  + ${c.name}  ${c.to}');
+        case PodChangeKind.removed:
+          Logger.error('  - ${c.name}  ${c.from}');
+        case PodChangeKind.changed:
+          Logger.warning('  ~ ${c.name}  ${c.from} → ${c.to}');
+      }
+    }
+    Logger.plain('');
+    Logger.dim('${changes.length} pod(s) changed.');
   }
 }
 
