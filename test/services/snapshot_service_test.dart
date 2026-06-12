@@ -90,6 +90,20 @@ void main() {
     test('is empty for a project with no snapshots', () {
       expect(svc.listSnapshots(project.path), isEmpty);
     });
+
+    test('matches snapshots when listed via a non-normalized path (. segment)',
+        () {
+      // Regression: `fve use` saves with the absolute cwd while `fve snapshots`
+      // listed with '.', producing `/proj/.` — a different project id — so the
+      // listing always came up empty. The id must be path-normalized.
+      writeLock('lock 3.22.2\n');
+      svc.save(project.path, '3.22.2');
+
+      final dottedPath = p.join(project.path, '.'); // e.g. /tmp/proj/.
+      final versions =
+          svc.listSnapshots(dottedPath).map((s) => s.version).toList();
+      expect(versions, contains('3.22.2'));
+    });
   });
 
   group('removeVersionSnapshots', () {

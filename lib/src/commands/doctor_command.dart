@@ -154,6 +154,10 @@ class DoctorCommand extends FveCommand {
       _checkRubyVersion();
     }
     if (!Platform.isMacOS) {
+      // Linux Flutter archives are `.tar.xz`; extraction needs the xz binary.
+      _checkTool('xz', ['--version'],
+          hint: 'Install xz-utils — needed to extract Flutter .tar.xz '
+              'archives (fve install --no-git).');
       _checkAndroidSdk();
       _checkJavaVersion();
     }
@@ -295,19 +299,30 @@ class DoctorCommand extends FveCommand {
     final installed = _installedCocoaPodsVersion();
     if (installed == null) return; // pod not found — reported elsewhere
 
-    if (lockCp == installed) {
-      _check('CocoaPods version', true, 'Podfile.lock and pod both $lockCp');
-    } else {
-      _check(
-        'CocoaPods version',
-        false,
+    final detail =
         'Podfile.lock built with CocoaPods $lockCp, installed is $installed\n'
-        '    Re-run: fve pod install  (regenerates the lock)',
-      );
+        '    Re-run: fve pod install  (regenerates the lock)';
+
+    switch (cocoaPodsDrift(lockCp, installed)) {
+      case CocoaPodsDrift.none:
+        _check('CocoaPods version', true, 'Podfile.lock and pod both $lockCp');
+      case CocoaPodsDrift.patch:
+        // Patch-only drift is almost always benign — warn, but don't fail the
+        // doctor run, so a routine CocoaPods patch release doesn't break CI.
+        Logger.warning('  CocoaPods version (patch drift)');
+        Logger.dim('    $detail');
+      case CocoaPodsDrift.significant:
+        // Major/minor drift can change resolution or the generated Pods
+        // project — surface as a critical failure (exit 1).
+        _check('CocoaPods version', false, detail, critical: true);
     }
   }
 
   String? _installedCocoaPodsVersion() {
+    // Test seam: force the "installed" version deterministically (the drift
+    // check otherwise depends on whatever `pod` is on the host).
+    final override = Platform.environment['FVE_FAKE_POD_VERSION'];
+    if (override != null && override.isNotEmpty) return override;
     try {
       final r = Process.runSync('pod', ['--version']);
       if (r.exitCode != 0) return null;
@@ -374,14 +389,16 @@ class DoctorCommand extends FveCommand {
     }
   }
 
-  void _checkTool(String tool, List<String> args) {
+  void _checkTool(String tool, List<String> args, {String? hint}) {
     try {
       final result = Process.runSync(tool, args);
       final ok = result.exitCode == 0;
       final version = result.stdout.toString().trim().split('\n').first;
       _check(tool, ok, ok ? version : null);
+      if (!ok && hint != null) Logger.dim('    $hint');
     } catch (_) {
       Logger.error('  $tool: not found');
+      if (hint != null) Logger.dim('    $hint');
     }
   }
 }

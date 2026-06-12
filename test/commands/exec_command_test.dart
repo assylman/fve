@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import '../helpers/fve_process.dart';
@@ -101,6 +103,18 @@ void main() {
       final r = await env.run(['exec', '--', 'printenv', 'FVE_VERSION']);
       expect(r.exitCode, 0);
       expect(r.output.trim(), '3.22.2');
+    });
+
+    test('prepends the version bin dir to PATH as a standalone entry',
+        () async {
+      // Regression: PATH entries are delimited by `:`/`;`, not the file-path
+      // separator. The SDK bin dir must be a real PATH element, otherwise the
+      // managed flutter/dart never resolves inside `fve exec`.
+      final r = await env.run(['exec', '--', 'printenv', 'PATH']);
+      expect(r.exitCode, 0);
+      final sep = Platform.isWindows ? ';' : ':';
+      final entries = r.output.trim().split(sep);
+      expect(entries, contains(env.versionBinDir('3.22.2')));
     });
   });
 

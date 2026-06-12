@@ -5,6 +5,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.1] — 2026-06-12
+
+Battle-test hardening (Linux/Docker "Env A" + macOS/iOS "Env B"). All fixes ship with regression tests.
+
+### Fixed
+
+- **`fve exec` / `fve spawn` PATH was built with the file separator, not the PATH-list separator.** The managed SDK's `bin` dir was glued to the next entry (`…/3.22.2/bin//usr/lib/dart/bin`), so the managed `flutter`/`dart` was unreachable via `PATH` inside `exec`/`spawn` on every platform. Now uses `:` (POSIX) / `;` (Windows).
+- **`fve spawn <version> -- <command>` failed.** `spawn` uses `allowAnything()`, so a leading `--` survived in the arguments and fve tried to exec `--`. The documented `--` form now works.
+- **`fve snapshots` per-project listing was always empty.** The project id hashed `'.'` as `/proj/.`, a different id than the absolute `/proj` that `fve use` saved under. Paths are now normalized so both map to the same id.
+
+### Changed
+
+- **`fve doctor` CocoaPods drift now distinguishes severity.** A **major/minor** mismatch between `Podfile.lock` and the installed `pod` (e.g. `1.15.x` vs `1.16.x`) is a critical failure (**exit 1**); a **patch-only** difference (e.g. `1.16.1` vs `1.16.2`) is a non-fatal warning (exit 0) so routine CocoaPods patch releases don't break CI gates.
+- Archive extraction/download failures now carry actionable hints (install `xz-utils` for `.tar.xz`, `unzip` for `.zip`) instead of a bare `tar failed`.
+- `fve doctor` now checks for `xz` on Linux (needed to extract `.tar.xz` archives via `fve install --no-git`).
+
+### Added
+
+- The streaming HTTP archive download (the `--no-git` / no-aria2 fallback) now retries a dropped connection up to 3 times, cleaning the partial file each attempt, with a clean actionable error on final failure.
+
+---
+
 ## [0.2.0] — 2026-06-10
 
 ### CocoaPods / iOS isolation

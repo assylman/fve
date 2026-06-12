@@ -1,9 +1,41 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:fve/src/services/download_service.dart';
+import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
+
+/// A fake [http.Client] for the streaming download path. The first
+/// [failTimes] `send` calls return a body that drops mid-stream (simulating a
+/// connection reset); subsequent calls stream [payload] in full.
+class _FlakyClient extends http.BaseClient {
+  _FlakyClient({required this.payload, required this.failTimes});
+
+  final List<int> payload;
+  final int failTimes;
+  int calls = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final attempt = calls++;
+    if (attempt < failTimes) {
+      // Emit a couple of bytes, then error out like a dropped connection.
+      final broken = Stream<List<int>>.fromIterable([payload.take(2).toList()])
+          .asyncExpand((chunk) async* {
+        yield chunk;
+        throw http.ClientException('Connection closed while receiving data');
+      });
+      return http.StreamedResponse(broken, 200, contentLength: payload.length);
+    }
+    return http.StreamedResponse(
+      Stream<List<int>>.fromIterable([payload]),
+      200,
+      contentLength: payload.length,
+    );
+  }
+}
 
 void main() {
   late Directory tempDir;
@@ -83,6 +115,40 @@ void main() {
         () => service.verifySha256(file.path, expected),
         returnsNormally,
       );
+    });
+  });
+
+  // ── HTTP download retry ─────────────────────────────────────────────────────
+
+  group('DownloadService.download — HTTP streaming retry', () {
+    final payload = utf8.encode('flutter sdk archive payload bytes');
+
+    test('retries a dropped connection and ultimately writes the full file',
+        () async {
+      final client = _FlakyClient(payload: payload, failTimes: 1);
+      final service = DownloadService(client: client, aria2Enabled: false);
+      final dest = '${tempDir.path}/sdk.tar.xz';
+
+      await service.download('https://example.test/sdk.tar.xz', dest);
+
+      expect(client.calls, 2, reason: 'one failure + one success');
+      expect(File(dest).readAsBytesSync(), equals(payload));
+    });
+
+    test('gives up after the max attempts with an actionable error', () async {
+      final client = _FlakyClient(payload: payload, failTimes: 99);
+      final service = DownloadService(client: client, aria2Enabled: false);
+      final dest = '${tempDir.path}/sdk.tar.xz';
+
+      try {
+        await service.download('https://example.test/sdk.tar.xz', dest);
+        fail('Expected the download to fail after retries.');
+      } catch (e) {
+        expect(e.toString(), contains('Download failed after'));
+        expect(e.toString(), contains('aria2c'));
+      }
+      // Partial file must not be left behind on hard failure.
+      expect(File(dest).existsSync(), isFalse);
     });
   });
 }

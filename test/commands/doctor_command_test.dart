@@ -167,6 +167,56 @@ void main() {
     });
   });
 
+  group('fve doctor — CocoaPods drift', () {
+    late Directory projDir;
+
+    Future<FveResult> doctorWithPod(String installedPod) => env.runWithPath(
+          ['doctor'],
+          workingDir: projDir.path,
+          extraEnv: {'FVE_FAKE_POD_VERSION': installedPod},
+        );
+
+    setUp(() async {
+      projDir = env.createProjectDir(pinnedVersion: '3.22.2');
+      env.installVersion('3.22.2');
+      final iosDir = Directory(p.join(projDir.path, 'ios'))..createSync();
+      File(p.join(iosDir.path, 'Podfile'))
+          .writeAsStringSync("platform :ios, '12.0'\n");
+      await env.run(
+        ['use', '3.22.2', '--skip-pub-get', '--no-vscode'],
+        workingDir: projDir.path,
+      );
+    });
+
+    void writeLockWithCocoaPods(String version) {
+      File(p.join(projDir.path, 'ios', 'Podfile.lock')).writeAsStringSync(
+        'PODS:\n  - Flutter (1.0.0)\n\nCOCOAPODS: $version\n',
+      );
+    }
+
+    test('major/minor drift fails doctor (exit 1)', () async {
+      writeLockWithCocoaPods('1.10.0');
+      final r = await doctorWithPod('1.16.2');
+      expect(r.exitCode, 1);
+      expect(r.output, contains('1.10.0'));
+      expect(r.output, contains('1.16.2'));
+    });
+
+    test('patch-only drift warns but does not fail (exit 0)', () async {
+      writeLockWithCocoaPods('1.16.1');
+      final r = await doctorWithPod('1.16.2');
+      expect(r.exitCode, 0);
+      expect(r.output.toLowerCase(), contains('patch drift'));
+    });
+
+    test('matching versions pass (exit 0)', () async {
+      writeLockWithCocoaPods('1.16.2');
+      final r = await doctorWithPod('1.16.2');
+      expect(r.exitCode, 0);
+      expect(r.output, contains('Podfile.lock and pod both 1.16.2'));
+    });
+  });
+
   group('fve doctor — with ios/Podfile, wrong version injected', () {
     late Directory projDir;
 

@@ -55,6 +55,12 @@ class SpawnCommand extends FveCommand {
     final version = rest.first;
     final commandParts = rest.skip(1).toList();
 
+    // Drop a leading `--` separator so the documented
+    // `fve spawn <version> -- <command>` form works (allowAnything keeps it).
+    if (commandParts.isNotEmpty && commandParts.first == '--') {
+      commandParts.removeAt(0);
+    }
+
     if (commandParts.isEmpty) {
       stderr.writeln(
         'Error: please provide a command to run after the version.\n'
@@ -73,7 +79,11 @@ class SpawnCommand extends FveCommand {
 
     final versionBinDir = p.join(cache.versionDir(version), 'bin');
     final currentPath = Platform.environment['PATH'] ?? '';
-    final newPath = '$versionBinDir${Platform.pathSeparator}$currentPath';
+    // PATH entries are delimited by `:` (POSIX) / `;` (Windows), NOT the
+    // file-path separator. Using Platform.pathSeparator glues the SDK bin dir
+    // to the next entry and the managed Flutter/Dart never resolves.
+    final pathListSep = Platform.isWindows ? ';' : ':';
+    final newPath = '$versionBinDir$pathListSep$currentPath';
 
     final env = Map<String, String>.from(Platform.environment)
       ..['PATH'] = newPath
