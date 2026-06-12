@@ -16,7 +16,13 @@ import '../utils/tui.dart';
 class DownloadService {
   final http.Client _client;
 
-  DownloadService({http.Client? client}) : _client = client ?? http.Client();
+  /// When false, skip the aria2c backend and always use the HTTP streaming
+  /// path. Used by tests to deterministically exercise the HTTP downloader.
+  final bool _aria2Enabled;
+
+  DownloadService({http.Client? client, bool aria2Enabled = true})
+      : _client = client ?? http.Client(),
+        _aria2Enabled = aria2Enabled;
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -61,7 +67,7 @@ class DownloadService {
   ///   interrupted downloads automatically with `-c`.
   /// - HTTP streaming is used as a fallback with a tip to install aria2c.
   Future<void> download(String url, String destPath) async {
-    if (await _aria2Available()) {
+    if (_aria2Enabled && await _aria2Available()) {
       await _downloadWithAria2(url, destPath);
     } else {
       Logger.dim(
@@ -312,7 +318,45 @@ class DownloadService {
 
   // ── HTTP streaming fallback ───────────────────────────────────────────────
 
+  /// Max attempts for the streaming HTTP download. A dropped connection
+  /// mid-transfer (common on flaky networks for a multi-hundred-MB SDK) is
+  /// retried from scratch; the aria2c backend handles resuming on its own.
+  static const int _httpMaxAttempts = 3;
+
   Future<void> _downloadWithHttp(String url, String destPath) async {
+    for (var attempt = 1;; attempt++) {
+      try {
+        await _httpDownloadAttempt(url, destPath);
+        return;
+      } on Exception catch (e) {
+        // Drop the partial file before retrying / failing.
+        final partial = File(destPath);
+        if (partial.existsSync()) {
+          try {
+            partial.deleteSync();
+          } catch (_) {}
+        }
+
+        final transient =
+            e is http.ClientException || e is SocketException || e is HttpException;
+        if (!transient || attempt >= _httpMaxAttempts) {
+          throw Exception(
+            'Download failed after $attempt attempt(s): $url\n'
+            '  $e\n'
+            '  Check your connection and retry, or install aria2c for '
+            'resumable parallel downloads.',
+          );
+        }
+        Logger.dim(
+          '  Download interrupted (attempt $attempt/$_httpMaxAttempts) — '
+          'retrying…',
+        );
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+  }
+
+  Future<void> _httpDownloadAttempt(String url, String destPath) async {
     final request  = http.Request('GET', Uri.parse(url));
     final response = await _client.send(request);
 
@@ -325,13 +369,15 @@ class DownloadService {
     final sink   = File(destPath).openWrite();
     final bar    = ProgressBar(total: total, label: p.basename(destPath));
 
-    await for (final chunk in response.stream) {
-      sink.add(chunk);
-      received += chunk.length;
-      bar.update(received);
+    try {
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        bar.update(received);
+      }
+    } finally {
+      await sink.close();
     }
-
-    await sink.close();
     bar.complete();
   }
 
@@ -341,19 +387,29 @@ class DownloadService {
     final ext = archivePath.toLowerCase();
 
     if (ext.endsWith('.zip')) {
-      await _runProcess('unzip', ['-q', archivePath, '-d', targetDir]);
+      await _runProcess('unzip', ['-q', archivePath, '-d', targetDir],
+          hint: 'Extracting .zip requires the `unzip` utility — install it '
+              'and retry, or use the default git-based `fve install`.');
     } else if (ext.endsWith('.tar.xz') || ext.endsWith('.tar.gz')) {
-      await _runProcess('tar', ['-xf', archivePath, '-C', targetDir]);
+      final hint = ext.endsWith('.tar.xz')
+          ? 'Extracting .tar.xz requires the `xz` decompressor (tar shells out '
+              'to it). Install it (Debian/Ubuntu: apt-get install xz-utils; '
+              'Alpine: apk add xz) and retry, or use the default git-based '
+              '`fve install`.'
+          : null;
+      await _runProcess('tar', ['-xf', archivePath, '-C', targetDir],
+          hint: hint);
     } else {
       throw UnsupportedError('Unknown archive format: $archivePath');
     }
   }
 
-  Future<void> _runProcess(String cmd, List<String> args) async {
+  Future<void> _runProcess(String cmd, List<String> args, {String? hint}) async {
     final result = await Process.run(cmd, args);
     if (result.exitCode != 0) {
+      final extra = hint == null ? '' : '\n\n$hint';
       throw Exception(
-        '$cmd failed (exit ${result.exitCode}):\n${result.stderr}',
+        '$cmd failed (exit ${result.exitCode}):\n${result.stderr}$extra',
       );
     }
   }

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import '../helpers/fve_process.dart';
@@ -67,11 +69,26 @@ void main() {
       expect(r.output.trim(), '3.22.2');
     });
 
-    test('prepends the version bin dir to PATH', () async {
-      // Verify the version's bin/ directory appears in the spawned PATH.
+    test('prepends the version bin dir to PATH as a standalone entry',
+        () async {
+      // Regression: PATH entries are delimited by `:`/`;`, not the file-path
+      // separator. A buggy join glues the bin dir to the next entry, so a mere
+      // `contains('3.22.2')` passes while the SDK is actually unreachable.
+      // Assert the bin dir is a real, standalone PATH element.
       final r = await env.run(['spawn', '3.22.2', 'printenv', 'PATH']);
       expect(r.exitCode, 0);
-      expect(r.output, contains('3.22.2'));
+      final sep = Platform.isWindows ? ';' : ':';
+      final entries = r.output.trim().split(sep);
+      expect(entries, contains(env.versionBinDir('3.22.2')));
+    });
+
+    test('strips a leading -- before the command (documented syntax)',
+        () async {
+      // Regression: `fve spawn <version> -- <command>` is the documented form;
+      // allowAnything keeps the `--`, which must not be exec'd as the program.
+      final r = await env.run(['spawn', '3.22.2', '--', 'echo', 'hello']);
+      expect(r.exitCode, 0);
+      expect(r.output, contains('hello'));
     });
   });
 

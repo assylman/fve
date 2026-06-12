@@ -122,6 +122,11 @@ class FveTestEnv {
   String get homePath => homeDir.path;
   String get fveHome => p.join(homePath, '.fve');
   String get versionsDir => p.join(fveHome, 'versions');
+
+  /// Absolute path of a version's `bin/` directory — the entry exec/spawn
+  /// must prepend to PATH as a standalone element.
+  String versionBinDir(String version) => p.join(versionsDir, version, 'bin');
+
   String get currentLink => p.join(fveHome, 'current');
   String get configFilePath => p.join(fveHome, 'config.json');
 
@@ -213,12 +218,16 @@ class FveTestEnv {
     List<String> args, {
     String? workingDir,
     String? stdin,
+    Map<String, String> extraEnv = const {},
   }) =>
       run(
         args,
         workingDir: workingDir,
         stdin: stdin,
-        extraEnv: {'PATH': '$fveBinPath:${Platform.environment['PATH'] ?? ''}'},
+        extraEnv: {
+          'PATH': '$fveBinPath:${Platform.environment['PATH'] ?? ''}',
+          ...extraEnv,
+        },
       );
 
   // ── Query helpers ───────────────────────────────────────────────────────

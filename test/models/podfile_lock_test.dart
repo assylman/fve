@@ -79,4 +79,36 @@ void main() {
       expect(diffPodfileLocks(same, lk({'A': '1.0.0', 'B': '2.0.0'})), isEmpty);
     });
   });
+
+  group('cocoaPodsDrift', () {
+    test('identical versions → none', () {
+      expect(cocoaPodsDrift('1.16.2', '1.16.2'), CocoaPodsDrift.none);
+    });
+
+    test('missing patch component compares equal (1.16 == 1.16.0) → none', () {
+      expect(cocoaPodsDrift('1.16', '1.16.0'), CocoaPodsDrift.none);
+      expect(cocoaPodsDrift('1.16.0', '1.16'), CocoaPodsDrift.none);
+    });
+
+    test('patch-only difference → patch', () {
+      expect(cocoaPodsDrift('1.16.1', '1.16.2'), CocoaPodsDrift.patch);
+      expect(cocoaPodsDrift('1.16.2', '1.16.0'), CocoaPodsDrift.patch);
+    });
+
+    test('minor difference → significant', () {
+      expect(cocoaPodsDrift('1.15.0', '1.16.2'), CocoaPodsDrift.significant);
+    });
+
+    test('major difference → significant', () {
+      expect(cocoaPodsDrift('1.16.2', '2.0.0'), CocoaPodsDrift.significant);
+    });
+
+    test('unparseable / pre-release suffix is tolerated', () {
+      // Trailing non-numeric components are ignored (treated as 0).
+      expect(cocoaPodsDrift('1.16.2.beta', '1.16.2'), CocoaPodsDrift.none);
+      expect(cocoaPodsDrift('1.16.2', '1.16.2-rc1'), CocoaPodsDrift.none);
+      // Garbage major falls back to 0, so a real version is significant drift.
+      expect(cocoaPodsDrift('garbage', '1.16.2'), CocoaPodsDrift.significant);
+    });
+  });
 }

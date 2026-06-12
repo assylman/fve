@@ -46,7 +46,10 @@ class SnapshotService {
 
   String _projectId(String projectDir) {
     // Stable, filesystem-safe ID derived from the absolute project path.
-    final canonical = Directory(projectDir).absolute.path;
+    // Normalize so a caller passing '.' (cwd) and one passing the absolute
+    // path map to the SAME id — otherwise `/proj/.` and `/proj` hash apart and
+    // `fve snapshots` (which used '.') never matches what `fve use` saved.
+    final canonical = p.normalize(Directory(projectDir).absolute.path);
     var hash = 0;
     for (final c in canonical.codeUnits) {
       hash = (hash * 31 + c) & 0xFFFFFFFF;

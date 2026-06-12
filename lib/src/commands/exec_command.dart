@@ -62,7 +62,11 @@ class ExecCommand extends FveCommand {
 
     // Prepend version's bin dir to PATH.
     final currentPath = Platform.environment['PATH'] ?? '';
-    final newPath = '$versionBinDir${Platform.pathSeparator}$currentPath';
+    // PATH entries are delimited by `:` (POSIX) / `;` (Windows), NOT the
+    // file-path separator. Using Platform.pathSeparator glues the SDK bin dir
+    // to the next entry and the managed Flutter/Dart never resolves.
+    final pathListSep = Platform.isWindows ? ';' : ':';
+    final newPath = '$versionBinDir$pathListSep$currentPath';
 
     final env = Map<String, String>.from(Platform.environment)
       ..['PATH'] = newPath
